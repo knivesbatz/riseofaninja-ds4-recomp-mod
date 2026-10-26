@@ -51,7 +51,7 @@ The current build and distribution workflow targets **Windows x64**. Presets for
 - **DLC support**, with launcher import and STFS package installation at game startup. Character DLCs use additional recompiled engine modules.
 - **Game language selection**, with English, French, German, Spanish, and Italian options in the launcher; available text and voices depend on your game files.
 - **External translation mods**, selected in the launcher's game language list, with UTF-8 text replacements by ID and fallback to the original English text. Releases include the complete Brazilian Portuguese package. See the [translation mod guide](docs/translation-mods.md).
-- **PlayStation button prompts**: with a DualShock 4 or another PlayStation controller, the game's hints and tutorials name its buttons ("Press [Cross] to jump"), automatically or always, from the launcher. See [PlayStation button prompts](docs/configuration.md#playstation-button-prompts).
+- **PlayStation button prompts**: with a DualShock 4 or another PlayStation controller, the game's hints and tutorials show its buttons, as real ✕ ○ □ △ icons with the DualShock 4 icon pack or as names ("Press [Cross] to jump") without it, automatically or always, from the launcher. The touchpad acts as Back. See [PlayStation button prompts](docs/configuration.md#playstation-button-prompts).
 
 **Launcher and distribution**
 

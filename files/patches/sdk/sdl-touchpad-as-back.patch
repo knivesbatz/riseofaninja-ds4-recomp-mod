@@ -1,0 +1,16 @@
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index c7c440d..a4bf0c3 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -554,8 +554,9 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& even
+           X_INPUT_GAMEPAD_B,
+           X_INPUT_GAMEPAD_X,
+           X_INPUT_GAMEPAD_A,
+-          // PS touchpad button
+-          X_INPUT_GAMEPAD_GUIDE,
++          // PS touchpad button: Back, the button the PlayStation prompts
++          // show as the touchpad (Share stays Back too).
++          X_INPUT_GAMEPAD_BACK,
+       };
+   static_assert(SDL_GAMEPAD_BUTTON_SOUTH == 0);
+   static_assert(SDL_GAMEPAD_BUTTON_DPAD_RIGHT == 14);

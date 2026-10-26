@@ -152,7 +152,7 @@ The executable also exports `NvOptimusEnablement` and `AmdPowerXpressRequestHigh
 
 ## PlayStation button prompts
 
-With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutorials can name the PlayStation buttons in place of the Xbox button icons: "Press [Cross] to jump", "Hold [L2] and perform the hand seals". Choose it under **Settings → Controls → Controller prompts**:
+With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutorials can show the PlayStation buttons in place of the Xbox ones. Choose it under **Settings → Controls → Controller prompts**:
 
 | Choice | `controller_prompts` | Effect |
 | --- | --- | --- |
@@ -160,16 +160,30 @@ With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutoria
 | Xbox | `"xbox"` | The game's icons |
 | PlayStation (DualShock 4) | `"playstation"` | PlayStation buttons with any controller |
 
+### With the DualShock 4 icon pack (recommended)
+
+The icon pack (`tools/ds4-icons` in the DS4 prompts mod) redraws the button icons inside the game's `naruto.bf`: the font's A/B/X/Y become ✕ ○ □ △, the shoulder icons L2/R2 and L1/R1, the stick icons L/R sticks, and the large HUD buttons PlayStation ones. Its installer leaves `ds4_icons.installed` next to `narutorise.exe`; when the PlayStation style is chosen and that file exists, the texts keep their icons and only `<lb>`/`<rb>` move to the pack's L1/R1 glyphs (the game's font has one shoulder icon per side, which the pack draws as L2/R2 for `<lt>`/`<rt>`).
+
+The pack changes the game files themselves, so its icons show whatever the setting; run `ds4_icons.py restore` to bring back the Xbox icons.
+
+### Without the icon pack
+
+The buttons are written as words, because the game's fonts have no cross, circle, square or triangle symbols:
+
 | Game tag | Shown as |
 | --- | --- |
 | A / B / X / Y | [Cross] / [Circle] / [Square] / [Triangle] |
 | LB / RB | [L1] / [R1] |
 | LT / RT | [L2] / [R2] |
-| Start / Back | [Options] / [Share] |
+| Start / Back | [Options] / [Touchpad] |
 
-The buttons are written as words, because the game's fonts have no cross, circle, square or triangle symbols. Stick and d-pad icons do not name a controller and stay; a combo such as Left + X shows the stick icon followed by `+[Square]`. The choice is made when the game starts: connect the controller before launching it. The prompts need the English game text, with or without a translation mod. With **Keyboard and mouse** and **Show keys in game texts** on, the game texts show the keys instead.
+Stick and d-pad icons do not name a controller and stay; a combo such as Left + X shows the stick icon followed by `+[Square]`.
 
-Only the texts with button tags change: button icons the game draws as images, outside its texts, stay Xbox ones. If Steam Input presents the DualShock 4 as an Xbox controller, Automatic sees an Xbox controller; choose PlayStation instead. The game log lists the choice under `[pad prompts]`.
+### Both
+
+The choice is made when the game starts: connect the controller before launching it. The prompts need the English game text, with or without a translation mod. With **Keyboard and mouse** and **Show keys in game texts** on, the game texts show the keys instead. If Steam Input presents the DualShock 4 as an Xbox controller, Automatic sees an Xbox controller; choose PlayStation instead. The game log lists the choice under `[pad prompts]`.
+
+Pressing the DualShock 4 touchpad acts as the Xbox Back button (the SDK patch `patches/sdk/sdl-touchpad-as-back.patch`); Share still works as Back too.
 
 ## Keyboard and mouse
 

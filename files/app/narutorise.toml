@@ -33,8 +33,10 @@ input_backend = "sdl"
 # Controller buttons in the game's hints and tutorials: "auto" shows the
 # PlayStation buttons ("Press [Cross] to jump") when the first connected
 # controller is a DualShock 4 or another PlayStation pad, "xbox" keeps the
-# game's icons, "playstation" always shows the PlayStation buttons. English game
-# text only; with mnk_mode and mnk_key_prompts, the keys take their place.
+# game's icons, "playstation" always shows the PlayStation buttons. With the
+# DualShock 4 icon pack installed (ds4_icons.installed next to the executable)
+# the icons themselves are PlayStation ones and stay icons. English game text
+# only; with mnk_mode and mnk_key_prompts, the keys take their place.
 controller_prompts = "auto"
 # Keyboard and mouse as a controller, next to a connected one. While exploring,
 # the mouse turns the camera itself at mnk_sensitivity (1.0 = 100%, about one
