@@ -194,19 +194,22 @@ def lzo1x_compress_to(src, size):
 
 def chunks(raw):
     """(uncompressed size, stored bytes) of each chunk of a bigfile entry."""
-    # [size][chunk: uncompressed size, stored size, bytes]...[0, 0]; size
-    # counts everything after it but the last 4 bytes of the end marker.
+    # [size][chunk: uncompressed size, stored size, bytes]...[0]; size
+    # counts everything after it, up to and with the 0. raw is read 4 bytes
+    # longer than that; those are usually 0, but in some entries not.
     p = 4
     out = []
     while True:
-        un, cs = struct.unpack_from('<II', raw, p)
-        p += 8
-        if un == 0 and cs == 0:
+        un = struct.unpack_from('<I', raw, p)[0]
+        p += 4
+        if un == 0:
             out.append((0, b''))
             break
+        cs = struct.unpack_from('<I', raw, p)[0]
+        p += 4
         out.append((un, raw[p:p + cs]))
         p += cs
-    assert p == len(raw), 'unexpected entry size'
+    assert p == len(raw) - 4, 'unexpected entry size'
     return out
 
 
@@ -389,7 +392,8 @@ def install_clip(folder):
 
 
 # Menu text. The game's strings are in one bigfile entry per language,
-# keys 0xFD?90232 (1 English, 2 French, 3 Spanish, 4 Italian, 5 German).
+# keys 0xFD?90232 (1 English, 2 French, 3 Spanish, 4 Italian, 5 German,
+# 7 a Japanese placeholder holding the English text; others use English rules).
 # The entry holds a text record: u32 count | 0x01000000, then count x
 # [u32 id, u32 ?, u32 length], then the strings, each followed by a 0.
 # A length with the top bit set is a UTF-16 string of that many characters.
@@ -397,7 +401,11 @@ TEXT_RULES = {
     1: [(r'Xbox LIVE Marketplace', 'PlayStation Store'),
         (r'Xbox 360 Hard Drive', 'PS4 System Storage'),
         (r'Xbox 360 Memory Unit', 'USB Storage Device'),
-        (r'Xbox Guide button', 'PS button')],
+        (r'Xbox Guide button', 'PS button'),
+        # What an early build of this installer wrote in the placeholder table
+        (r'PSN Marketplace', 'PlayStation Store'),
+        (r'DUALSHOCK 4 Hard Drive', 'PS4 System Storage'),
+        (r'DUALSHOCK 4 Memory Unit', 'USB Storage Device')],
     2: [(r'Marché Xbox LIVE', 'PlayStation Store'),
         (r'Disque dur Xbox 360', 'Stockage système PS4'),
         (r'Carte mémoire Xbox 360', 'Périphérique de stockage USB'),
@@ -449,7 +457,7 @@ def text_str(length, b):
 
 def patch_text(word, strings, lang):
     """The text record with the Xbox names changed, and how many changed."""
-    rules = TEXT_RULES.get(lang, []) + TEXT_RULES_LAST
+    rules = TEXT_RULES.get(lang, TEXT_RULES[1]) + TEXT_RULES_LAST
     head = bytearray(struct.pack('<I', word))
     body = bytearray()
     changed = 0
@@ -506,7 +514,7 @@ def same_size_entry(raw, chs, new):
     body = bytearray(raw[:4])
     for piece, size in zip(pieces, sizes):
         body += struct.pack('<II', len(piece), size) + lzo1x_compress_to(piece, size)
-    body += struct.pack('<II', 0, 0)
+    body += struct.pack('<I', 0) + raw[-4:]
     assert len(body) == len(raw) and unpack_chunks(chunks(bytes(body))) == new
     return bytes(body)
 
@@ -544,6 +552,8 @@ def text_status(f, fat):
     left = done = 0
     for i, key, off, raw, chs, u in text_entries(f, fat):
         for k, p, s, (word, strings) in text_records(u):
+            if not strings:
+                continue
             n = sum(1 for tid, field, length, b in strings if XBOX_LEFT.search(text_str(length, b)))
             left += n
             done += 0 if n else 1
