@@ -2,7 +2,8 @@ r"""DualShock 4 button icons for Naruto: Rise of a Ninja (PC port).
 
 Swaps the Xbox button icons for PlayStation ones in two files:
   game\naruto.bf          the font's A/B/X/Y, shoulder and stick glyphs, and
-                          the 64x64 HUD buttons;
+                          the 64x64 HUD buttons; also the menu text, where
+                          Xbox LIVE becomes PSN (all five languages);
   game\Naruto_clip.SRA    the button images the menus and HUD (Scaleform
                           movies) draw, 443 of them.
 The first run copies each file to <name>.ds4bak; "restore" puts those back.
@@ -23,6 +24,7 @@ Pure Python 3, no packages needed.
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -92,9 +94,10 @@ def unpack(b):
     return bytes(out)
 
 
-def lzo1x_compress(src):
+def lzo1x_compress(src, pad=0):
     """Greedy LZO1X compressor: M2/M3/M4 matches and literal runs, the
-    instructions the game's decompressor reads."""
+    instructions the game's decompressor reads. pad > 0 writes that many
+    short matches in the 1-byte-longer M3 form, to grow the output."""
     n = len(src)
     out = bytearray()
     last_match_at = -1   # index in out of the byte carrying the next lits count
@@ -137,7 +140,13 @@ def lzo1x_compress(src):
             if 1 <= pending <= 3 and last_match_at < 0 and out:
                 ip += 1; continue
             emit_literals(ip)
-            if m <= 8 and d <= 2048:
+            if m <= 8 and d <= 2048 and pad:
+                pad -= 1
+                out.append(32 | (m - 2))
+                v = (d - 1) << 2
+                last_match_at = len(out)
+                out.append(v & 0xFF); out.append(v >> 8)
+            elif m <= 8 and d <= 2048:
                 out.append(((m - 1) << 5) | (((d - 1) & 7) << 2))
                 last_match_at = len(out) - 1
                 out.append((d - 1) >> 3)
@@ -169,6 +178,18 @@ def lzo1x_compress(src):
     emit_literals(n)
     out += b'\x11\x00\x00'
     return bytes(out)
+
+
+def lzo1x_compress_to(src, size):
+    """src compressed to exactly size bytes."""
+    data = lzo1x_compress(src)
+    if len(data) > size:
+        raise ValueError('does not fit')
+    data = lzo1x_compress(src, size - len(data))
+    if len(data) != size:
+        raise ValueError('cannot pad to size')
+    assert lzo1x(data) == src
+    return data
 
 
 def chunks(raw):
@@ -367,6 +388,168 @@ def install_clip(folder):
           else 'Naruto_clip.SRA: the menu/HUD icons are already installed.')
 
 
+# Menu text. The game's strings are in one bigfile entry per language,
+# keys 0xFD?90232 (1 English, 2 French, 3 Spanish, 4 Italian, 5 German).
+# The entry holds a text record: u32 count | 0x01000000, then count x
+# [u32 id, u32 ?, u32 length], then the strings, each followed by a 0.
+# A length with the top bit set is a UTF-16 string of that many characters.
+TEXT_RULES = {
+    1: [(r'Xbox LIVE Marketplace', 'PlayStation Store'),
+        (r'Xbox 360 Hard Drive', 'PS4 System Storage'),
+        (r'Xbox 360 Memory Unit', 'USB Storage Device'),
+        (r'Xbox Guide button', 'PS button')],
+    2: [(r'Marché Xbox LIVE', 'PlayStation Store'),
+        (r'Disque dur Xbox 360', 'Stockage système PS4'),
+        (r'Carte mémoire Xbox 360', 'Périphérique de stockage USB'),
+        (r'touche Xbox Guide', 'touche PS')],
+    3: [(r'Bazar Xbox LIVE', 'PlayStation Store'),
+        (r'Disco duro Xbox 360', 'Almacenamiento del sistema PS4'),
+        (r'Unidad de memoria Xbox 360', 'Dispositivo de almacenamiento USB'),
+        (r'Botón Guía Xbox', 'botón PS')],
+    4: [(r'Marketplace Xbox LIVE', 'PlayStation Store'),
+        (r'Disco rigido Xbox 360', 'Memoria di sistema PS4'),
+        (r'Memory Unit Xbox 360', 'Dispositivo di archiviazione USB'),
+        (r'pulsante della Guida Xbox', 'tasto PS')],
+    5: [(r'Xbox LIVE-Marktplatz', 'PlayStation Store'),
+        (r'Xbox 360 Festplatte', 'PS4-Systemspeicher'),
+        (r'Xbox 360 Memory Unit', 'USB-Speichergerät'),
+        (r'Xbox Guide-Taste', 'PS-Taste')],
+}
+# After the ones above, in every language. Case-sensitive, so the
+# www.narutoxbox360game.com address is left alone.
+TEXT_RULES_LAST = [(r'Xbox ?360', 'DUALSHOCK 4'), (r'X[Bb][Oo][Xx] LIVE', 'PSN')]
+XBOX_LEFT = re.compile(r'X[Bb][Oo][Xx]')
+
+
+def is_text_key(key):
+    return key & 0xFF0FFFFF == 0xFD090232
+
+
+def parse_text(data):
+    """[(id, field, length word, string bytes)] or None."""
+    if len(data) < 4:
+        return None
+    word = struct.unpack_from('<I', data, 0)[0]
+    n = word & 0xFFFFFF
+    if word >> 24 != 1 or 4 + 12 * n > len(data):
+        return None
+    p = 4 + 12 * n
+    out = []
+    for i in range(n):
+        tid, field, length = struct.unpack_from('<3I', data, 4 + 12 * i)
+        size = (length & 0x7FFFFFFF) * 2 + 2 if length >> 31 else length + 1
+        out.append((tid, field, length, data[p:p + size]))
+        p += size
+    return (word, out) if p == len(data) else None
+
+
+def text_str(length, b):
+    return b[:-2].decode('utf-16-le') if length >> 31 else b[:-1].decode('latin-1')
+
+
+def patch_text(word, strings, lang):
+    """The text record with the Xbox names changed, and how many changed."""
+    rules = TEXT_RULES.get(lang, []) + TEXT_RULES_LAST
+    head = bytearray(struct.pack('<I', word))
+    body = bytearray()
+    changed = 0
+    for tid, field, length, b in strings:
+        old = text_str(length, b)
+        new = old
+        for pat, rep in rules:
+            new = re.sub(pat, rep, new)
+        if new != old:
+            changed += 1
+            try:
+                if length >> 31:
+                    raise UnicodeError
+                b = new.encode('latin-1') + b'\0'
+                length = len(b) - 1
+            except UnicodeError:
+                b = new.encode('utf-16-le') + b'\0\0'
+                length = 0x80000000 | (len(b) // 2 - 1)
+        head += struct.pack('<3I', tid, field, length)
+        body += b
+    return bytes(head + body), changed
+
+
+def text_entries(f, fat):
+    """Yields (index, key, offset, raw entry, chunks, unpacked) for each
+    language's text entry."""
+    for i, (off, key) in enumerate(fat):
+        if not is_text_key(key):
+            continue
+        size = struct.unpack('<I', (f.seek(off), f.read(4))[1])[0]
+        f.seek(off)
+        raw = f.read(size + 8)
+        try:
+            chs = chunks(raw)
+            yield i, key, off, raw, chs, unpack_chunks(chs)
+        except Exception:
+            continue
+
+
+def text_records(u):
+    for k, p, s in resources(u):
+        t = parse_text(u[p:p + s])
+        if t:
+            yield k, p, s, t
+
+
+def same_size_entry(raw, chs, new):
+    """new, stored in chunks of the same sizes as the original entry's, so
+    the entry and every table pointing at it stay as they are."""
+    sizes = [len(data) for un, data in chs if un]
+    pieces = [new[i:i + CHUNK] for i in range(0, len(new), CHUNK)]
+    if len(pieces) != len(sizes):
+        raise ValueError('the text no longer fits the same chunks')
+    body = bytearray(raw[:4])
+    for piece, size in zip(pieces, sizes):
+        body += struct.pack('<II', len(piece), size) + lzo1x_compress_to(piece, size)
+    body += struct.pack('<II', 0, 0)
+    assert len(body) == len(raw) and unpack_chunks(chunks(bytes(body))) == new
+    return bytes(body)
+
+
+def install_text(f, fat):
+    changed = 0
+    for i, key, off, raw, chs, u in list(text_entries(f, fat)):
+        new = bytearray()
+        pos = 0
+        count = 0
+        for k, p, s, (word, strings) in text_records(u):
+            data, n = patch_text(word, strings, (key >> 20) & 0xF)
+            if not n:
+                continue
+            new += u[pos:p - 12] + struct.pack('<III', len(data), MAGIC, k) + data
+            pos = p + s
+            count += n
+        if not count:
+            continue
+        new = bytes(new + u[pos:])
+        try:
+            blob = same_size_entry(raw, chs, new)
+        except ValueError as e:
+            print(f'  text {key:08x}: {e}, left alone')
+            continue
+        f.seek(off)
+        f.write(blob)
+        changed += 1
+        print(f'  patched text {key:08x} ({count} strings)', flush=True)
+    print(f'naruto.bf: Xbox LIVE text changed to PSN in {changed} languages.' if changed
+          else 'naruto.bf: the PSN text is already installed.')
+
+
+def text_status(f, fat):
+    left = done = 0
+    for i, key, off, raw, chs, u in text_entries(f, fat):
+        for k, p, s, (word, strings) in text_records(u):
+            n = sum(1 for tid, field, length, b in strings if XBOX_LEFT.search(text_str(length, b)))
+            left += n
+            done += 0 if n else 1
+    return done, left
+
+
 def exe_folder(folder):
     for path in (folder, os.path.dirname(os.path.abspath(folder))):
         if os.path.isfile(os.path.join(path, 'narutorise.exe')):
@@ -425,7 +608,8 @@ def install(folder):
             f.write(blob[:4])
             changed += 1
             print(f'  patched entry {key:08x} ({todo} textures)', flush=True)
-    print(f'naruto.bf: {changed} bigfile entries patched.' if changed else 'naruto.bf: the icons are already installed.')
+        print(f'naruto.bf: {changed} bigfile entries patched.' if changed else 'naruto.bf: the icons are already installed.')
+        install_text(f, fat)
     install_clip(folder)
     set_marker(folder, True)
 
@@ -454,7 +638,9 @@ def status(folder):
             for k, p, s in found:
                 now = sha(u[p:p + s])
                 counts['patched' if now == patch[k][1] else 'original' if now == patch[k][0] else 'other'] += 1
+        done, left = text_status(f, fat)
     print(f'naruto.bf textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
+    print(f'naruto.bf text: {done} languages with PSN names, {left} strings still naming Xbox.')
     print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
     clip = find_clip(folder)
     clip_patch = load_clip_patch()
