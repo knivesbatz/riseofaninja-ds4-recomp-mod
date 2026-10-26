@@ -304,6 +304,8 @@ def scan(f, fat, patch, total):
         size = struct.unpack('<I', (f.seek(off), f.read(4))[1])[0]
         f.seek(off)
         raw = f.read(size + 8)
+        if raw[-4:] != bytes(4):
+            continue   # repack() writes those 4 bytes; the icon entries all have 0 there
         try:
             chs = chunks(raw)
             u = unpack_chunks(chs)
