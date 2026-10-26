@@ -726,6 +726,7 @@ def status(folder):
         done, left = text_status(f, fat)
     print(f'naruto.bf textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
     print(f'naruto.bf text: {done} text tables with PSN names, {left} strings still naming Xbox.')
+    print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
     for dlc in dlc_bigfiles():
         with open(dlc, 'rb') as f:
             _, _, fat = read_tables(f)
@@ -733,7 +734,6 @@ def status(folder):
         if done or left:
             print(f'{os.path.basename(dlc)} text: {done} text tables with PSN names, {left} strings still naming Xbox.')
             print('  backup:', 'yes' if os.path.exists(dlc + '.ds4bak') else 'no')
-    print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
     clip = find_clip(folder)
     clip_patch = load_clip_patch()
     counts = {'original': 0, 'patched': 0, 'other': 0}
