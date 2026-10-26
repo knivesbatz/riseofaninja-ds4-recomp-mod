@@ -1,9 +1,11 @@
 r"""DualShock 4 button icons for Naruto: Rise of a Ninja (PC port).
 
-Swaps the Xbox button icons for PlayStation ones in two files:
+Swaps the Xbox button icons and names for PlayStation ones in these files:
   game\naruto.bf          the font's A/B/X/Y, shoulder and stick glyphs, and
                           the 64x64 HUD buttons; also the menu text, where
                           Xbox LIVE becomes PSN (all five languages);
+  Documents\narutorise\...\Naruto_DLC?.bf   the DLC copies of the menu text
+                          (backed up the same way), which the game uses;
   game\Naruto_clip.SRA    the button images the menus and HUD (Scaleform
                           movies) draw, 443 of them.
 The first run copies each file to <name>.ds4bak; "restore" puts those back.
@@ -521,7 +523,7 @@ def same_size_entry(raw, chs, new):
     return bytes(body)
 
 
-def install_text(f, fat):
+def install_text(f, fat, name='naruto.bf'):
     changed = 0
     for i, key, off, raw, chs, u in list(text_entries(f, fat)):
         new = bytearray()
@@ -546,8 +548,51 @@ def install_text(f, fat):
         f.write(blob)
         changed += 1
         print(f'  patched text {key:08x} ({count} strings)', flush=True)
-    print(f'naruto.bf: Xbox LIVE text changed to PSN in {changed} languages.' if changed
-          else 'naruto.bf: the PSN text is already installed.')
+    print(f'{name}: Xbox LIVE text changed to PSN in {changed} languages.' if changed
+          else f'{name}: the PSN text is already installed.')
+
+
+def documents():
+    if os.name == 'nt':
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0:
+            return buf.value
+    return os.path.join(os.path.expanduser('~'), 'Documents')
+
+
+def dlc_bigfiles():
+    """The DLC bigfiles the runtime unpacked into Documents\narutorise.
+    DLC2 and DLC3 carry their own copy of the menu text, which the game
+    uses instead of naruto.bf's."""
+    base = os.path.join(documents(), 'narutorise', '0000000000000000', '555307E5', '00000002')
+    found = []
+    if os.path.isdir(base):
+        for pkg in sorted(os.listdir(base)):
+            d = os.path.join(base, pkg)
+            if os.path.isdir(d):
+                found += [os.path.join(d, n) for n in sorted(os.listdir(d))
+                          if n.lower().startswith('naruto_dlc') and n.lower().endswith('.bf')]
+    return found
+
+
+def install_dlc_text():
+    for bf in dlc_bigfiles():
+        name = os.path.basename(bf)
+        with open(bf, 'rb') as f:
+            _, _, fat = read_tables(f)
+            done, left = text_status(f, fat)
+        if not left:
+            if done:
+                print(f'{name}: the PSN text is already installed.')
+            continue
+        if not os.path.exists(bf + '.ds4bak'):
+            print(f'Backing up {bf} -> {bf}.ds4bak ...', flush=True)
+            shutil.copyfile(bf, bf + '.ds4bak.part')
+            os.replace(bf + '.ds4bak.part', bf + '.ds4bak')
+        with open(bf, 'r+b') as f:
+            _, _, fat = read_tables(f)
+            install_text(f, fat, name)
 
 
 def text_status(f, fat):
@@ -622,6 +667,7 @@ def install(folder):
             print(f'  patched entry {key:08x} ({todo} textures)', flush=True)
         print(f'naruto.bf: {changed} bigfile entries patched.' if changed else 'naruto.bf: the icons are already installed.')
         install_text(f, fat)
+    install_dlc_text()
     install_clip(folder)
     set_marker(folder, True)
 
@@ -637,6 +683,10 @@ def restore(folder):
     if os.path.exists(clip + '.ds4bak'):
         shutil.copyfile(clip + '.ds4bak', clip)
         print(f'Restored {clip} from {clip}.ds4bak.')
+    for dlc in dlc_bigfiles():
+        if os.path.exists(dlc + '.ds4bak'):
+            shutil.copyfile(dlc + '.ds4bak', dlc)
+            print(f'Restored {dlc} from {dlc}.ds4bak.')
     set_marker(folder, False)
 
 
@@ -653,6 +703,13 @@ def status(folder):
         done, left = text_status(f, fat)
     print(f'naruto.bf textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
     print(f'naruto.bf text: {done} languages with PSN names, {left} strings still naming Xbox.')
+    for dlc in dlc_bigfiles():
+        with open(dlc, 'rb') as f:
+            _, _, fat = read_tables(f)
+            done, left = text_status(f, fat)
+        if done or left:
+            print(f'{os.path.basename(dlc)} text: {done} languages with PSN names, {left} strings still naming Xbox.')
+            print('  backup:', 'yes' if os.path.exists(dlc + '.ds4bak') else 'no')
     print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
     clip = find_clip(folder)
     clip_patch = load_clip_patch()

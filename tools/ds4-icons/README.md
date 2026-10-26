@@ -7,6 +7,8 @@ Redraws the Xbox button icons as PlayStation ones, in two of the game's files:
 
 It also renames the Xbox services in the menu text (`naruto.bf`, in English, French, Spanish, Italian and German, plus the Japanese placeholder table, which holds the English text): Xbox LIVE becomes PSN ("Online PSN"), Xbox LIVE Marketplace becomes PlayStation Store, Xbox 360 Hard Drive / Memory Unit become PS4 System Storage / USB Storage Device, the Xbox 360 Controller becomes the DUALSHOCK 4 Controller and the Xbox Guide button the PS button. The old help web address is left as it is.
 
+The game takes the menu text from the DLC packs when they are installed: the runtime unpacks them into `Documents\narutorise\0000000000000000\555307E5\00000002\`, and `Naruto_DLC2.bf` and `Naruto_DLC3.bf` there each carry a full copy of the text. The installer patches those too, backing each up to `<name>.ds4bak` first; `restore` puts them back.
+
 
 | Xbox icon | Becomes |
 | --- | --- |
