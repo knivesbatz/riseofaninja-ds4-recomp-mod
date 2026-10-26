@@ -1,15 +1,20 @@
-"""DualShock 4 button icons for Naruto: Rise of a Ninja (PC port).
+r"""DualShock 4 button icons for Naruto: Rise of a Ninja (PC port).
 
-Swaps the Xbox button icons in game\naruto.bf (the font's A/B/X/Y, shoulder
-and stick glyphs, and the 64x64 HUD buttons) for PlayStation ones. The first
-run copies naruto.bf to naruto.bf.ds4bak; "restore" puts that copy back.
+Swaps the Xbox button icons for PlayStation ones in two files:
+  game\naruto.bf          the font's A/B/X/Y, shoulder and stick glyphs, and
+                          the 64x64 HUD buttons;
+  game\Naruto_clip.SRA    the button images the menus and HUD (Scaleform
+                          movies) draw, 411 of them.
+The first run copies each file to <name>.ds4bak; "restore" puts those back.
 
     python ds4_icons.py install  "<game folder>"
     python ds4_icons.py restore  "<game folder>"
     python ds4_icons.py status   "<game folder>"
-    python ds4_icons.py extract  "<game folder>" <out dir>   (originals, for compose_icons.py)
+    python ds4_icons.py extract  "<game folder>" <out dir>   (originals, for compose_icons.py and compose_clip.py)
 
 <game folder> is the folder with narutorise.exe (or its "game" subfolder).
+Each patched Naruto_clip.SRA image is compressed again and written over the
+original in place (they all fit), with its size in the table updated.
 A patched bigfile entry is written back in its own place (the icons compress
 better than the Xbox ones, so it fits), with only the changed 128 KB chunks
 compressed again; its size in the file table is updated. Nothing moves.
@@ -21,6 +26,8 @@ import os
 import shutil
 import struct
 import sys
+import zipfile
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHUNK = 0x20000
@@ -288,6 +295,78 @@ def scan(f, fat, patch, total):
             print(f'  scanned {n}/{len(fat)} entries', flush=True)
 
 
+def find_clip(folder):
+    for path in (os.path.join(folder, 'game', 'Naruto_clip.SRA'), os.path.join(folder, 'Naruto_clip.SRA')):
+        if os.path.isfile(path):
+            return path
+    sys.exit(f'Naruto_clip.SRA not found in {folder} or {folder}\\game')
+
+
+def load_clip_patch():
+    """key -> (original sha, patched sha, patched DDS) for the movie images."""
+    manifest = json.load(open(os.path.join(HERE, 'data', 'clip_manifest.json')))
+    icons = zipfile.ZipFile(os.path.join(HERE, 'data', 'clip_icons.zip'))
+    patch = {}
+    for key, entry in manifest.items():
+        dds = icons.read(key + '.dds')
+        if sha(dds) != entry['patched']:
+            raise ValueError(f'clip_icons.zip: {key}.dds does not match the manifest')
+        patch[int(key, 16)] = (entry['original'], entry['patched'], dds)
+    return patch
+
+
+def clip_images(f, patch):
+    """Yields (table position, entry, image bytes) for each patched image
+    in Naruto_clip.SRA. The file starts "FRSA", 1, then the offset and count
+    of a table of 28-byte entries [type, key, hash, offset, stored size,
+    size, 1]; type 2 is one zlib-compressed DDS image."""
+    f.seek(0)
+    head = f.read(24)
+    if head[:8] != b'FRSA\1\0\0\0':
+        sys.exit('Naruto_clip.SRA is not the file this mod expects')
+    o1, n1 = struct.unpack_from('<II', head, 8)
+    f.seek(o1)
+    table = f.read(28 * n1)
+    for i in range(n1):
+        e = list(struct.unpack_from('<7I', table, 28 * i))
+        if e[0] != 2 or e[1] not in patch:
+            continue
+        f.seek(e[3])
+        yield o1 + 28 * i, e, zlib.decompress(f.read(e[4]))
+
+
+def install_clip(folder):
+    clip = find_clip(folder)
+    backup = clip + '.ds4bak'
+    patch = load_clip_patch()
+    if not os.path.exists(backup):
+        print(f'Backing up {clip} -> {backup} ...', flush=True)
+        shutil.copyfile(clip, backup + '.part')
+        os.replace(backup + '.part', backup)
+    changed = 0
+    with open(clip, 'r+b') as f:
+        for at, e, image in list(clip_images(f, patch)):
+            original, patched, dds = patch[e[1]]
+            now = sha(image)
+            if now == patched:
+                continue
+            if now != original:
+                print(f'  image {e[1]:08x} is not the one this mod expects, left alone')
+                continue
+            data = zlib.compress(dds, 9)
+            if len(data) > e[4]:
+                print(f'  image {e[1]:08x} does not fit in place, left alone')
+                continue
+            f.seek(e[3])
+            f.write(data + bytes(e[4] - len(data)))
+            e[4] = len(data)
+            f.seek(at)
+            f.write(struct.pack('<7I', *e))
+            changed += 1
+    print(f'Naruto_clip.SRA: {changed} menu/HUD images patched.' if changed
+          else 'Naruto_clip.SRA: the menu/HUD icons are already installed.')
+
+
 def exe_folder(folder):
     for path in (folder, os.path.dirname(os.path.abspath(folder))):
         if os.path.isfile(os.path.join(path, 'narutorise.exe')):
@@ -346,8 +425,9 @@ def install(folder):
             f.write(blob[:4])
             changed += 1
             print(f'  patched entry {key:08x} ({todo} textures)', flush=True)
+    print(f'naruto.bf: {changed} bigfile entries patched.' if changed else 'naruto.bf: the icons are already installed.')
+    install_clip(folder)
     set_marker(folder, True)
-    print(f'Done: {changed} bigfile entries patched.' if changed else 'Nothing to do: the icons are already installed.')
 
 
 def restore(folder):
@@ -356,8 +436,12 @@ def restore(folder):
     if not os.path.exists(backup):
         sys.exit(f'No backup at {backup}')
     shutil.copyfile(backup, bf)
-    set_marker(folder, False)
     print(f'Restored {bf} from {backup}.')
+    clip = find_clip(folder)
+    if os.path.exists(clip + '.ds4bak'):
+        shutil.copyfile(clip + '.ds4bak', clip)
+        print(f'Restored {clip} from {clip}.ds4bak.')
+    set_marker(folder, False)
 
 
 def status(folder):
@@ -370,8 +454,18 @@ def status(folder):
             for k, p, s in found:
                 now = sha(u[p:p + s])
                 counts['patched' if now == patch[k][1] else 'original' if now == patch[k][0] else 'other'] += 1
-    print(f'Textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
-    print('Backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
+    print(f'naruto.bf textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
+    print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
+    clip = find_clip(folder)
+    clip_patch = load_clip_patch()
+    counts = {'original': 0, 'patched': 0, 'other': 0}
+    with open(clip, 'rb') as f:
+        for at, e, image in clip_images(f, clip_patch):
+            now = sha(image)
+            p = clip_patch[e[1]]
+            counts['patched' if now == p[1] else 'original' if now == p[0] else 'other'] += 1
+    print(f'Naruto_clip.SRA images: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
+    print('  backup:', 'yes' if os.path.exists(clip + '.ds4bak') else 'no')
 
 
 def extract(folder, out_dir):
@@ -389,6 +483,16 @@ def extract(folder, out_dir):
             if not left:
                 break
     print('Extracted the original textures.' if not left else f'Not found: {sorted(map(hex, left))}')
+    clip_patch = load_clip_patch()
+    clip_dir = os.path.join(out_dir, 'clip')
+    os.makedirs(clip_dir, exist_ok=True)
+    count = 0
+    with open(find_clip(folder), 'rb') as f:
+        for at, e, image in clip_images(f, clip_patch):
+            if sha(image) == clip_patch[e[1]][0]:
+                open(os.path.join(clip_dir, f'{e[1]:08x}.dds'), 'wb').write(image)
+                count += 1
+    print(f'Extracted {count} of {len(clip_patch)} original menu/HUD images into {clip_dir}.')
 
 
 if __name__ == '__main__':

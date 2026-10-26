@@ -29,7 +29,7 @@ The mod has two parts. Use the first alone, or both:
    python ds4_icons.py install "C:\Program Files (x86)\Steam\steamapps\common\NarutoRisePC"
    ```
 
-   The default port install is `%LOCALAPPDATA%\NarutoRisePC`. The first run backs up `game\naruto.bf` as `game\naruto.bf.ds4bak` (about 630 MB, so keep 1 GB free), then patches it in place; its size does not change. It takes a minute or two.
+   The default port install is `%LOCALAPPDATA%\NarutoRisePC`. The first run backs up `game\naruto.bf` as `game\naruto.bf.ds4bak` (about 630 MB) and `game\Naruto_clip.SRA` (the menus and HUD) as `game\Naruto_clip.SRA.ds4bak` (about 70 MB), so keep 1 GB free, then patches both in place; their sizes do not change. It takes a minute or two.
 4. Play. To go back to the Xbox icons: `python ds4_icons.py restore "<same folder>"`.
 
 More detail in [tools/ds4-icons/README.md](tools/ds4-icons/README.md).
@@ -93,11 +93,11 @@ Install the icon pack too (see above), so the buttons show as icons.
 - **Steam Input:** Steam can make a DualShock 4 look like an Xbox controller, so Automatic picks Xbox. Choose **PlayStation (DualShock 4)** instead.
 - **Keyboard and mouse mode:** with **Show keys in game texts** on, the game shows your keys instead.
 - **Without the launcher:** in `narutorise.toml`, set `controller_prompts = "auto"`, `"playstation"` or `"xbox"`.
-- **Game updates:** if `naruto.bf` is replaced (a reinstall, or Steam verifying files), run `install` again.
+- **Game updates:** if `naruto.bf` or `Naruto_clip.SRA` is replaced (a reinstall, or Steam verifying files), run `install` again.
 
 ## Troubleshooting
 
-Still seeing Xbox icons? Run `python ds4_icons.py status "<folder>"`: it counts the PlayStation and Xbox icons in `naruto.bf`. With the code mod, open the newest file in the `logs` folder next to `narutorise.exe` and search for `[pad prompts]`. That line says which controller was found and why it chose the style it did.
+Still seeing Xbox icons? Run `python ds4_icons.py status "<folder>"`: it counts the PlayStation and Xbox icons in `naruto.bf` and `Naruto_clip.SRA`. With the code mod, open the newest file in the `logs` folder next to `narutorise.exe` and search for `[pad prompts]`. That line says which controller was found and why it chose the style it did.
 
 ## License
 
