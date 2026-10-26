@@ -1,0 +1,685 @@
+From eaf642d6c3bb65ef0126c4ed332b52c0a63fcfdf Mon Sep 17 00:00:00 2001
+From: knivesbatz <knivesbatz@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 06:22:28 +0000
+Subject: [PATCH] Add PlayStation (DualShock 4) button prompts in game texts
+
+With a DualShock 4 or another PlayStation controller, the button tags of
+the game's hints and tutorials name the PlayStation buttons in place of
+the Xbox icons: <a> -> [Cross], <b> -> [Circle], <x> -> [Square],
+<y> -> [Triangle], <lb>/<rb> -> [L1]/[R1], <lt>/<rt> -> [L2]/[R2],
+<start>/<back> -> [Options]/[Share]. Stick and d-pad icons stay; combo
+tags such as <x-left> become <analogleft>+[Square].
+
+controller_prompts = "auto" (default) follows the type SDL reports for
+the first connected controller; "xbox" and "playstation" force a style.
+The launcher offers it under Settings -> Controls in all seven
+languages. Keyboard prompts keep priority in keyboard and mouse mode.
+
+Built on the translation mod's text-table hook, so it works with the
+English game text and with translation mods, on both renderers.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Fpb2rxNJzQBH2MVFpEwjo7
+---
+ README.md                        |   1 +
+ app/CMakeLists.txt               |   4 ++
+ app/narutorise.toml              |   6 ++
+ app/src/mods/pad_prompts.cpp     | 116 +++++++++++++++++++++++++++++++
+ app/src/mods/pad_prompts.h       |  36 ++++++++++
+ app/src/mods/translation_mod.cpp |  74 ++++++++++++++++++++
+ app/tests/pad_prompts_test.cpp   | 100 ++++++++++++++++++++++++++
+ docs/configuration.md            |  21 ++++++
+ launcher/src/config_manager.cpp  |   2 +
+ launcher/src/config_manager.h    |   3 +
+ launcher/src/locales/de.h        |   3 +
+ launcher/src/locales/es.h        |   3 +
+ launcher/src/locales/fr.h        |   3 +
+ launcher/src/locales/it.h        |   3 +
+ launcher/src/locales/ru.h        |   3 +
+ launcher/src/localization.cpp    |   6 ++
+ launcher/src/localization.h      |   3 +
+ launcher/src/pages/settings.cpp  |  12 ++++
+ 18 files changed, 399 insertions(+)
+ create mode 100644 app/src/mods/pad_prompts.cpp
+ create mode 100644 app/src/mods/pad_prompts.h
+ create mode 100644 app/tests/pad_prompts_test.cpp
+
+diff --git a/README.md b/README.md
+index 1c4c3a1..be19764 100644
+--- a/README.md
++++ b/README.md
+@@ -51,6 +51,7 @@ The current build and distribution workflow targets **Windows x64**. Presets for
+ - **DLC support**, with launcher import and STFS package installation at game startup. Character DLCs use additional recompiled engine modules.
+ - **Game language selection**, with English, French, German, Spanish, and Italian options in the launcher; available text and voices depend on your game files.
+ - **External translation mods**, selected in the launcher's game language list, with UTF-8 text replacements by ID and fallback to the original English text. Releases include the complete Brazilian Portuguese package. See the [translation mod guide](docs/translation-mods.md).
++- **PlayStation button prompts**: with a DualShock 4 or another PlayStation controller, the game's hints and tutorials name its buttons ("Press [Cross] to jump"), automatically or always, from the launcher. See [PlayStation button prompts](docs/configuration.md#playstation-button-prompts).
+ 
+ **Launcher and distribution**
+ 
+diff --git a/app/CMakeLists.txt b/app/CMakeLists.txt
+index 8594a1e..9e642c5 100644
+--- a/app/CMakeLists.txt
++++ b/app/CMakeLists.txt
+@@ -27,6 +27,7 @@ set(NARUTORISE_SOURCES
+     src/wine.cpp
+     src/mouse_camera.cpp
+     src/mods/key_prompts.cpp
++    src/mods/pad_prompts.cpp
+     src/mods/translation_data.cpp
+     src/mods/translation_mod.cpp
+ )
+@@ -111,6 +112,9 @@ target_link_libraries(narutorise_translation_test PRIVATE rex::runtime narutoris
+ add_executable(narutorise_key_prompts_test EXCLUDE_FROM_ALL
+     tests/key_prompts_test.cpp src/mods/key_prompts.cpp)
+ target_include_directories(narutorise_key_prompts_test PRIVATE src)
++add_executable(narutorise_pad_prompts_test EXCLUDE_FROM_ALL
++    tests/pad_prompts_test.cpp src/mods/pad_prompts.cpp)
++target_include_directories(narutorise_pad_prompts_test PRIVATE src)
+ 
+ add_executable(narutorise_validate_translation_package EXCLUDE_FROM_ALL
+     ../tools/localization/validate-package.cpp src/mods/translation_data.cpp)
+diff --git a/app/narutorise.toml b/app/narutorise.toml
+index fa1506c..7330237 100644
+--- a/app/narutorise.toml
++++ b/app/narutorise.toml
+@@ -30,6 +30,12 @@ log_level = "info"
+ protect_zero = false
+ 
+ input_backend = "sdl"
++# Controller buttons in the game's hints and tutorials: "auto" shows the
++# PlayStation buttons ("Press [Cross] to jump") when the first connected
++# controller is a DualShock 4 or another PlayStation pad, "xbox" keeps the
++# game's icons, "playstation" always shows the PlayStation buttons. English game
++# text only; with mnk_mode and mnk_key_prompts, the keys take their place.
++controller_prompts = "auto"
+ # Keyboard and mouse as a controller, next to a connected one. While exploring,
+ # the mouse turns the camera itself at mnk_sensitivity (1.0 = 100%, about one
+ # turn every 2,100 pixels); elsewhere it stands in for the right stick.
+diff --git a/app/src/mods/pad_prompts.cpp b/app/src/mods/pad_prompts.cpp
+new file mode 100644
+index 0000000..d8f01b2
+--- /dev/null
++++ b/app/src/mods/pad_prompts.cpp
+@@ -0,0 +1,116 @@
++#include "mods/pad_prompts.h"
++
++#include <array>
++#include <utility>
++
++namespace narutorise::pad_prompts {
++namespace {
++
++// The button tags of the English text tables (mods/key_prompts.cpp) and the
++// DualShock 4 button in each one's place. Names rather than symbols: the
++// game's fonts lack the cross, circle, square and triangle glyphs.
++constexpr std::pair<std::string_view, std::string_view> kButtons[] = {
++    {"a", "Cross"},  {"b", "Circle"}, {"x", "Square"},  {"y", "Triangle"},
++    {"lb", "L1"},    {"rb", "R1"},    {"lt", "L2"},     {"rt", "R2"},
++    {"start", "Options"},            {"back", "Share"},
++};
++
++// The directions of the combo tags ("<x-left>"), each also a stick tag of its
++// own ("<analogleft>") that draws the same direction without a button.
++constexpr std::array<std::string_view, 4> kDirections = {"up", "down", "left", "right"};
++
++bool EqualsNoCase(std::string_view a, std::string_view b) {
++  if (a.size() != b.size())
++    return false;
++  for (size_t i = 0; i < a.size(); ++i) {
++    char x = a[i], y = b[i];
++    if (x >= 'A' && x <= 'Z')
++      x = char(x - 'A' + 'a');
++    if (y >= 'A' && y <= 'Z')
++      y = char(y - 'A' + 'a');
++    if (x != y)
++      return false;
++  }
++  return true;
++}
++
++bool IsDirection(std::string_view name) {
++  for (const auto direction : kDirections) {
++    if (name == direction)
++      return true;
++  }
++  return false;
++}
++
++}  // namespace
++
++bool ParseSetting(std::string_view value, Setting& out) {
++  while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
++    value.remove_prefix(1);
++  while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
++    value.remove_suffix(1);
++  if (EqualsNoCase(value, "auto")) {
++    out = Setting::kAuto;
++  } else if (EqualsNoCase(value, "xbox")) {
++    out = Setting::kXbox;
++  } else if (EqualsNoCase(value, "playstation") || EqualsNoCase(value, "ps4") ||
++             EqualsNoCase(value, "dualshock4")) {
++    out = Setting::kPlayStation;
++  } else {
++    return false;
++  }
++  return true;
++}
++
++const key_prompts::Labels& PlayStationLabels() {
++  static const key_prompts::Labels labels = [] {
++    key_prompts::Labels out;
++    for (const auto& [tag, label] : kButtons)
++      out.emplace(std::string(tag), std::string(label));
++    return out;
++  }();
++  return labels;
++}
++
++std::string ReplaceButtonTags(std::string_view text, const key_prompts::Labels& labels) {
++  const auto find = [&](std::string_view key) -> const std::string* {
++    const auto found = labels.find(key);
++    return found == labels.end() ? nullptr : &found->second;
++  };
++  // The replacement of one tag; empty when it stays as it is.
++  const auto replace = [&](std::string_view name) -> std::string {
++    // Combo input: a direction held with a button ("<x-left>").
++    if (const size_t dash = name.find('-'); dash != std::string_view::npos) {
++      const auto* button = find(name.substr(0, dash));
++      const auto direction = name.substr(dash + 1);
++      if (!button || !IsDirection(direction))
++        return {};
++      return "<analog" + std::string(direction) + ">+[" + *button + "]";
++    }
++    const auto* label = find(name);
++    return label ? "[" + *label + "]" : std::string{};
++  };
++
++  std::string out;
++  out.reserve(text.size());
++  size_t at = 0;
++  while (at < text.size()) {
++    const size_t open = text.find('<', at);
++    if (open == std::string_view::npos)
++      break;
++    const size_t close = text.find('>', open + 1);
++    if (close == std::string_view::npos)
++      break;
++    out.append(text.substr(at, open - at));
++    const auto replacement = replace(text.substr(open + 1, close - open - 1));
++    if (!replacement.empty())
++      out += replacement;
++    else
++      out.append(text.substr(open, close - open + 1));
++    at = close + 1;
++  }
++  out.append(text.substr(at));
++  return out;
++}
++
++}  // namespace narutorise::pad_prompts
+diff --git a/app/src/mods/pad_prompts.h b/app/src/mods/pad_prompts.h
+new file mode 100644
+index 0000000..e28e9a1
+--- /dev/null
++++ b/app/src/mods/pad_prompts.h
+@@ -0,0 +1,36 @@
++#pragma once
++
++// PlayStation prompts: with a DualShock 4 (or another PlayStation pad) the
++// game's Xbox button icons in text become the PlayStation buttons in the same
++// place ("Press <a> to jump" -> "Press [Cross] to jump"). The SDK maps a pad by
++// position (SDL's south button is A), so <a> is Cross, <x> Square, <lb> L1 and
++// so on. Sticks and the d-pad keep their icons, which do not name a pad; a
++// combo tag ("<x-left>") becomes its stick icon and the button ("<analogleft>+
++// [Square]"). Colour, line break and currency tags stay.
++//
++// Pure functions without SDK dependencies, so the host test can check them.
++
++#include <string>
++#include <string_view>
++
++#include "mods/key_prompts.h"
++
++namespace narutorise::pad_prompts {
++
++// The controller_prompts option: "auto" follows the first connected pad,
++// "xbox" keeps the game's icons, "playstation" always shows PlayStation names.
++enum class Setting { kAuto, kXbox, kPlayStation };
++
++// The setting a controller_prompts value names, ignoring case; false for an
++// unknown value, which leaves `out` unchanged.
++bool ParseSetting(std::string_view value, Setting& out);
++
++// Tag name without brackets ("a", "lt") -> PlayStation button ("Cross", "L2").
++const key_prompts::Labels& PlayStationLabels();
++
++// The text with each Xbox button tag replaced by "[label]" and each combo tag
++// by its direction's stick tag and "+[label]". Stick and d-pad tags, other
++// tags, unknown tags and unterminated '<' are kept byte for byte.
++std::string ReplaceButtonTags(std::string_view text, const key_prompts::Labels& labels);
++
++}  // namespace narutorise::pad_prompts
+diff --git a/app/src/mods/translation_mod.cpp b/app/src/mods/translation_mod.cpp
+index 15ad1dd..582e0c6 100644
+--- a/app/src/mods/translation_mod.cpp
++++ b/app/src/mods/translation_mod.cpp
+@@ -33,11 +33,14 @@
+ #include <rex/system/thread_state.h>
+ #include <rex/system/xmemory.h>
+ 
++#include <SDL3/SDL.h>
++
+ #include <atomic>
+ #include <cstring>
+ #include <mutex>
+ 
+ #include "mods/key_prompts.h"
++#include "mods/pad_prompts.h"
+ #include "mods/translation_data.h"
+ 
+ REXCVAR_DEFINE_STRING(translation_mod, "", "Mods",
+@@ -48,6 +51,11 @@ REXCVAR_DEFINE_BOOL(mnk_key_prompts, true, "Input",
+                     "With keyboard and mouse on, show the bound keys instead of controller button "
+                     "icons in game texts. Requires restart and English game language.")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_STRING(controller_prompts, "auto", "Input",
++                      "Controller buttons in game texts: auto (PlayStation names when the first "
++                      "connected controller is a PlayStation one), xbox (the game's icons) or "
++                      "playstation. Requires restart and English game language.")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
+ extern "C" void __imp__sub_8264E3A8(PPCContext& __restrict, uint8_t*);
+ extern "C" void __imp__sub_82687C98(PPCContext& __restrict, uint8_t*);
+@@ -84,6 +92,71 @@ void InitializeKeyPrompts() {
+   }
+ }
+ 
++// Whether the first connected controller, player 1 in the SDK's connection
++// order, is a PlayStation one. The SDL driver has opened the gamepad subsystem
++// by now (InputSystem::AttachWindow); the reference taken here keeps it open
++// while the pads are read, and opens it when the game uses XInput.
++bool PlayStationPadConnected(std::string& name) {
++  if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
++    REXLOG_WARN("[pad prompts] cannot read the controllers: {}", SDL_GetError());
++    return false;
++  }
++  int count = 0;
++  SDL_JoystickID* ids = SDL_GetGamepads(&count);
++  bool playstation = false;
++  if (ids && count > 0) {
++    const char* sdl_name = SDL_GetGamepadNameForID(ids[0]);
++    name = sdl_name ? sdl_name : "Gamepad";
++    switch (SDL_GetGamepadTypeForID(ids[0])) {
++      case SDL_GAMEPAD_TYPE_PS3:
++      case SDL_GAMEPAD_TYPE_PS4:
++      case SDL_GAMEPAD_TYPE_PS5:
++        playstation = true;
++        break;
++      default:
++        break;
++    }
++  }
++  SDL_free(ids);
++  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
++  return playstation;
++}
++
++// Xbox button icons become the PlayStation buttons in their place, unless the
++// keys took them. Chosen once, like the key prompts: a pad connected later
++// applies on the next start.
++void InitializePadPrompts() {
++  if (prompt_transform)
++    return;  // Keyboard and mouse mode shows the keys.
++  const std::string value = REXCVAR_GET(controller_prompts);
++  auto setting = pad_prompts::Setting::kAuto;
++  if (!pad_prompts::ParseSetting(value, setting))
++    REXLOG_WARN("[pad prompts] unknown controller_prompts \"{}\"; using auto", value);
++  if (setting == pad_prompts::Setting::kXbox)
++    return;
++  if (rex::cvar::Query<int32_t>("user_language") != 1) {
++    REXLOG_INFO("[pad prompts] only English texts are supported; button icons retained");
++    return;
++  }
++  if (setting == pad_prompts::Setting::kAuto) {
++    std::string name;
++    if (!PlayStationPadConnected(name)) {
++      if (name.empty())
++        REXLOG_INFO("[pad prompts] no controller connected; button icons retained");
++      else
++        REXLOG_INFO("[pad prompts] \"{}\" is not a PlayStation controller; button icons retained",
++                    name);
++      return;
++    }
++    REXLOG_INFO("[pad prompts] PlayStation controller \"{}\" detected", name);
++  }
++  for (const auto& [tag, label] : pad_prompts::PlayStationLabels())
++    REXLOG_INFO("[pad prompts] <{}> -> [{}]", tag, label);
++  prompt_transform = [](std::string_view text) {
++    return pad_prompts::ReplaceButtonTags(text, pad_prompts::PlayStationLabels());
++  };
++}
++
+ void LoadSelectedPackage(const std::filesystem::path& executable_root) {
+   const std::string selected = REXCVAR_GET(translation_mod);
+   if (selected.empty())
+@@ -187,6 +260,7 @@ void Initialize(const std::filesystem::path& executable_root) {
+   std::call_once(initialized, [&] {
+     LoadSelectedPackage(executable_root);
+     InitializeKeyPrompts();
++    InitializePadPrompts();
+     enabled.store(!package.texts.empty() || static_cast<bool>(prompt_transform),
+                   std::memory_order_release);
+   });
+diff --git a/app/tests/pad_prompts_test.cpp b/app/tests/pad_prompts_test.cpp
+new file mode 100644
+index 0000000..4b61caf
+--- /dev/null
++++ b/app/tests/pad_prompts_test.cpp
+@@ -0,0 +1,100 @@
++#include <iostream>
++#include <stdexcept>
++#include <string>
++
++#include "mods/pad_prompts.h"
++
++using namespace narutorise::pad_prompts;
++namespace {
++unsigned checks = 0;
++void Check(bool value, const char* label) {
++  ++checks;
++  if (!value)
++    throw std::runtime_error(label);
++}
++void Equal(const std::string& actual, const std::string& expected, const char* label) {
++  ++checks;
++  if (actual != expected)
++    throw std::runtime_error(std::string(label) + ": got \"" + actual + "\", expected \"" +
++                             expected + "\"");
++}
++
++std::string Replace(std::string_view text) {
++  return ReplaceButtonTags(text, PlayStationLabels());
++}
++
++void SettingTests() {
++  auto setting = Setting::kXbox;
++  Check(ParseSetting("auto", setting) && setting == Setting::kAuto, "auto");
++  Check(ParseSetting("xbox", setting) && setting == Setting::kXbox, "xbox");
++  Check(ParseSetting("playstation", setting) && setting == Setting::kPlayStation, "playstation");
++  Check(ParseSetting(" PlayStation ", setting) && setting == Setting::kPlayStation,
++        "case and spaces ignored");
++  Check(ParseSetting("PS4", setting) && setting == Setting::kPlayStation, "ps4 alias");
++  Check(ParseSetting("dualshock4", setting) && setting == Setting::kPlayStation, "dualshock4 alias");
++  setting = Setting::kXbox;
++  Check(!ParseSetting("switch", setting) && setting == Setting::kXbox, "unknown value unchanged");
++  Check(!ParseSetting("", setting), "empty value unknown");
++}
++
++void LabelTests() {
++  const auto& labels = PlayStationLabels();
++  // The SDK maps SDL's face buttons by position: south is A.
++  Equal(labels.at("a"), "Cross", "A is Cross");
++  Equal(labels.at("b"), "Circle", "B is Circle");
++  Equal(labels.at("x"), "Square", "X is Square");
++  Equal(labels.at("y"), "Triangle", "Y is Triangle");
++  Equal(labels.at("lb"), "L1", "LB");
++  Equal(labels.at("rb"), "R1", "RB");
++  Equal(labels.at("lt"), "L2", "LT");
++  Equal(labels.at("rt"), "R2", "RT");
++  Equal(labels.at("start"), "Options", "Start");
++  Equal(labels.at("back"), "Share", "Back");
++  Check(!labels.contains("analogup") && !labels.contains("leftanalog") && !labels.contains("dpad"),
++        "sticks and d-pad keep their icons");
++}
++
++void ReplaceTests() {
++  Equal(Replace("Press <a> to jump."), "Press [Cross] to jump.", "single tag");
++  Equal(Replace("Press <a>, <b>, <x> or <y> in any combination."),
++        "Press [Cross], [Circle], [Square] or [Triangle] in any combination.", "face buttons");
++  Equal(Replace("<yellow>Press <rb><white>. <br> Hold <x> for the log."),
++        "<yellow>Press [R1]<white>. <br> Hold [Square] for the log.", "colour and line tags kept");
++  Equal(Replace("Press <lt> <analogright><analogleft> <analogup><analogup>."),
++        "Press [L2] <analogright><analogleft> <analogup><analogup>.", "jutsu motions keep icons");
++  Equal(Replace("Press <lb> to open the inventory, <start> to pause, <back> for the map."),
++        "Press [L1] to open the inventory, [Options] to pause, [Share] for the map.",
++        "shoulder and menu buttons");
++  Equal(Replace("Steer with <leftanalog>, pick with <dpad>."),
++        "Steer with <leftanalog>, pick with <dpad>.", "group tags keep icons");
++  Equal(Replace("<x-left> <x> <x>"), "<analogleft>+[Square] [Square] [Square]",
++        "combo tag is the stick icon and the button");
++  Equal(Replace("<y-up> <y> <x>"), "<analogup>+[Triangle] [Triangle] [Square]", "combo tag up");
++  Equal(Replace("<x-right> <x> <x> <x> <y>"),
++        "<analogright>+[Square] [Square] [Square] [Square] [Triangle]", "combo tag right");
++  Equal(Replace("<z-left> <x-sideways> <x->"), "<z-left> <x-sideways> <x->",
++        "unknown combo parts kept");
++  Equal(Replace("Coins <goldcoin> <ancientcoin> <happy> <quest>"),
++        "Coins <goldcoin> <ancientcoin> <happy> <quest>", "non-button tags kept");
++  Equal(Replace("<A> <x"), "<A> <x", "case-sensitive, unterminated kept");
++  Equal(Replace("a > b < c"), "a > b < c", "stray brackets kept");
++  Equal(Replace("Sakura's <b>"), "Sakura's [Circle]", "UTF-8-safe ASCII around tags");
++  Equal(Replace(""), "", "empty text");
++  Equal(ReplaceButtonTags("Press <a>.", {}), "Press <a>.", "no labels, no change");
++  Equal(Replace("Pressione <a> para pular."), "Pressione [Cross] para pular.",
++        "translated text keeps working");
++}
++}  // namespace
++
++int main() {
++  try {
++    SettingTests();
++    LabelTests();
++    ReplaceTests();
++    std::cout << "pad prompts PASS checks=" << checks << '\n';
++    return 0;
++  } catch (const std::exception& error) {
++    std::cerr << "pad prompts FAIL after " << checks << " checks: " << error.what() << '\n';
++    return 1;
++  }
++}
+diff --git a/docs/configuration.md b/docs/configuration.md
+index 83cd51f..aa392ec 100644
+--- a/docs/configuration.md
++++ b/docs/configuration.md
+@@ -150,6 +150,27 @@ The launcher enumerates graphics cards through the selected API (**Settings →
+ 
+ The executable also exports `NvOptimusEnablement` and `AmdPowerXpressRequestHighPerformance`, so hybrid laptops (NVIDIA Optimus, AMD PowerXpress) run the game on the dedicated card. The log names the card in use: `DXGI adapter:` for Xenos, `Native renderer adapter:` for the native renderer.
+ 
++## PlayStation button prompts
++
++With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutorials can name the PlayStation buttons in place of the Xbox button icons: "Press [Cross] to jump", "Hold [L2] and perform the hand seals". Choose it under **Settings → Controls → Controller prompts**:
++
++| Choice | `controller_prompts` | Effect |
++| --- | --- | --- |
++| Automatic (default) | `"auto"` | PlayStation buttons when the first connected controller is a PlayStation one, Xbox icons otherwise |
++| Xbox | `"xbox"` | The game's icons |
++| PlayStation (DualShock 4) | `"playstation"` | PlayStation buttons with any controller |
++
++| Game tag | Shown as |
++| --- | --- |
++| A / B / X / Y | [Cross] / [Circle] / [Square] / [Triangle] |
++| LB / RB | [L1] / [R1] |
++| LT / RT | [L2] / [R2] |
++| Start / Back | [Options] / [Share] |
++
++The buttons are written as words, because the game's fonts have no cross, circle, square or triangle symbols. Stick and d-pad icons do not name a controller and stay; a combo such as Left + X shows the stick icon followed by `+[Square]`. The choice is made when the game starts: connect the controller before launching it. The prompts need the English game text, with or without a translation mod. With **Keyboard and mouse** and **Show keys in game texts** on, the game texts show the keys instead.
++
++Only the texts with button tags change: button icons the game draws as images, outside its texts, stay Xbox ones. If Steam Input presents the DualShock 4 as an Xbox controller, Automatic sees an Xbox controller; choose PlayStation instead. The game log lists the choice under `[pad prompts]`.
++
+ ## Keyboard and mouse
+ 
+ Turn on **Settings → Controls → Use keyboard and mouse**. The keyboard and mouse act as an Xbox controller and work alongside a connected controller.
+diff --git a/launcher/src/config_manager.cpp b/launcher/src/config_manager.cpp
+index 05187c7..633a80f 100644
+--- a/launcher/src/config_manager.cpp
++++ b/launcher/src/config_manager.cpp
+@@ -30,6 +30,7 @@ bool ConfigManager::Load(const std::filesystem::path& toml_path, GameConfig& con
+     if (auto v = tbl["log_level"].value<std::string>()) config.log_level = *v;
+     if (auto v = tbl["protect_zero"].value<bool>()) config.protect_zero = *v;
+     if (auto v = tbl["input_backend"].value<std::string>()) config.input_backend = *v;
++    if (auto v = tbl["controller_prompts"].value<std::string>()) config.controller_prompts = *v;
+     if (auto v = tbl["mnk_mode"].value<bool>()) config.mnk_mode = *v;
+     if (auto v = tbl["mnk_mouse"].value<bool>()) config.mnk_mouse = *v;
+     if (auto v = tbl["mnk_sensitivity"].value<double>()) config.mnk_sensitivity = *v;
+@@ -112,6 +113,7 @@ bool ConfigManager::Save(const std::filesystem::path& toml_path, const GameConfi
+   tbl.insert_or_assign("log_level", config.log_level);
+   tbl.insert_or_assign("protect_zero", config.protect_zero);
+   tbl.insert_or_assign("input_backend", config.input_backend);
++  tbl.insert_or_assign("controller_prompts", config.controller_prompts);
+   tbl.insert_or_assign("mnk_mode", config.mnk_mode);
+   tbl.insert_or_assign("mnk_mouse", config.mnk_mouse);
+   tbl.insert_or_assign("mnk_sensitivity", config.mnk_sensitivity);
+diff --git a/launcher/src/config_manager.h b/launcher/src/config_manager.h
+index 497d0ea..41cac6f 100644
+--- a/launcher/src/config_manager.h
++++ b/launcher/src/config_manager.h
+@@ -46,6 +46,9 @@ struct GameConfig {
+   bool protect_zero = false;
+ 
+   std::string input_backend = "sdl";
++  // Controller buttons in the game's texts: "auto" (PlayStation names with a
++  // PlayStation controller), "xbox" (the game's icons) or "playstation".
++  std::string controller_prompts = "auto";
+   // Keyboard and mouse mode, next to the controller: the mouse moves the
+   // camera (the right stick) at mnk_sensitivity (1.0 = 100%), and each
+   // controller input has its keys.
+diff --git a/launcher/src/locales/de.h b/launcher/src/locales/de.h
+index efd185a..31c0be8 100644
+--- a/launcher/src/locales/de.h
++++ b/launcher/src/locales/de.h
+@@ -182,6 +182,9 @@ inline constexpr const char* kDe[] = {
+     "Wie schnell die Kamera der Maus folgt. 100 % ist der Standard.",  // MouseSensitivityDescription
+     "Tasten in Spieltexten anzeigen",  // KeyPromptsLabel
+     "Zeigt in Hinweisen und Tutorials die belegten Tasten statt der Controllertasten, z. B. [Space] für A. Funktioniert mit englischem Spieltext und Übersetzungsmods.",  // KeyPromptsDescription
++    "Tasten in Spieltexten",  // ControllerPromptsLabel
++    "Die Controllertasten in Hinweisen und Tutorials des Spiels. Automatisch zeigt die PlayStation-Tasten, z. B. [Cross] für A, wenn der erste verbundene Controller ein DualShock 4 oder ein anderer PlayStation-Controller ist. Funktioniert mit englischem Spieltext und Übersetzungsmods; mit Tasten in Spieltexten zeigt der Tastatur-und-Maus-Modus die Tasten.",  // ControllerPromptsDescription
++    "Automatisch",  // ControllerPromptsAuto
+     "Tasten",  // KeysLabel
+     "Die Tasten und Maustasten für jede Controller-Eingabe, zwei pro Eingabe.",  // KeysDescription
+     "Tasten belegen…",  // MapKeysButton
+diff --git a/launcher/src/locales/es.h b/launcher/src/locales/es.h
+index d74f1c9..d693cd5 100644
+--- a/launcher/src/locales/es.h
++++ b/launcher/src/locales/es.h
+@@ -182,6 +182,9 @@ inline constexpr const char* kEs[] = {
+     "La rapidez con que la cámara sigue al ratón. 100 % es el valor predeterminado.",  // MouseSensitivityDescription
+     "Mostrar teclas en los textos",  // KeyPromptsLabel
+     "Muestra las teclas asignadas en lugar de los botones del mando en las pistas y tutoriales del juego, por ejemplo [Space] para A. Funciona con el texto del juego en inglés y con mods de traducción.",  // KeyPromptsDescription
++    "Botones en los textos",  // ControllerPromptsLabel
++    "Los botones del mando que se muestran en las pistas y tutoriales del juego. Automático muestra los botones de PlayStation, por ejemplo [Cross] para A, cuando el primer mando conectado es un DualShock 4 u otro mando de PlayStation. Funciona con el texto del juego en inglés y con mods de traducción; con las teclas en los textos, el modo teclado y ratón muestra las teclas.",  // ControllerPromptsDescription
++    "Automático",  // ControllerPromptsAuto
+     "Teclas",  // KeysLabel
+     "Las teclas y los botones del ratón de cada entrada del mando, dos por entrada.",  // KeysDescription
+     "Asignar teclas…",  // MapKeysButton
+diff --git a/launcher/src/locales/fr.h b/launcher/src/locales/fr.h
+index 5df80e6..e6cefb8 100644
+--- a/launcher/src/locales/fr.h
++++ b/launcher/src/locales/fr.h
+@@ -182,6 +182,9 @@ inline constexpr const char* kFr[] = {
+     "La vitesse à laquelle la caméra suit la souris. 100 % est la valeur par défaut.",  // MouseSensitivityDescription
+     "Afficher les touches dans les textes",  // KeyPromptsLabel
+     "Affiche les touches attribuées au lieu des boutons de la manette dans les astuces et tutoriels du jeu, par exemple [Space] pour A. Fonctionne avec le texte anglais du jeu et les mods de traduction.",  // KeyPromptsDescription
++    "Boutons dans les textes",  // ControllerPromptsLabel
++    "Les boutons de la manette affichés dans les astuces et tutoriels du jeu. Automatique affiche les boutons PlayStation, par exemple [Cross] pour A, lorsque la première manette connectée est une DualShock 4 ou une autre manette PlayStation. Fonctionne avec le texte anglais du jeu et les mods de traduction ; avec les touches dans les textes, le mode clavier et souris affiche les touches.",  // ControllerPromptsDescription
++    "Automatique",  // ControllerPromptsAuto
+     "Touches",  // KeysLabel
+     "Les touches et boutons de la souris de chaque commande de la manette, deux par commande.",  // KeysDescription
+     "Configurer les touches…",  // MapKeysButton
+diff --git a/launcher/src/locales/it.h b/launcher/src/locales/it.h
+index 943ecad..595028a 100644
+--- a/launcher/src/locales/it.h
++++ b/launcher/src/locales/it.h
+@@ -182,6 +182,9 @@ inline constexpr const char* kIt[] = {
+     "La velocità con cui la telecamera segue il mouse. 100% è il valore predefinito.",  // MouseSensitivityDescription
+     "Mostra i tasti nei testi",  // KeyPromptsLabel
+     "Mostra i tasti assegnati al posto dei pulsanti del controller nei suggerimenti e nei tutorial del gioco, ad esempio [Space] per A. Funziona con il testo del gioco in inglese e con le mod di traduzione.",  // KeyPromptsDescription
++    "Pulsanti nei testi",  // ControllerPromptsLabel
++    "I pulsanti del controller mostrati nei suggerimenti e nei tutorial del gioco. Automatico mostra i pulsanti PlayStation, ad esempio [Cross] per A, quando il primo controller collegato è un DualShock 4 o un altro controller PlayStation. Funziona con il testo del gioco in inglese e con le mod di traduzione; con i tasti nei testi, la modalità tastiera e mouse mostra i tasti.",  // ControllerPromptsDescription
++    "Automatico",  // ControllerPromptsAuto
+     "Tasti",  // KeysLabel
+     "I tasti e i pulsanti del mouse per ogni comando del controller, due per comando.",  // KeysDescription
+     "Assegna tasti…",  // MapKeysButton
+diff --git a/launcher/src/locales/ru.h b/launcher/src/locales/ru.h
+index 8f76195..f6afebf 100644
+--- a/launcher/src/locales/ru.h
++++ b/launcher/src/locales/ru.h
+@@ -182,6 +182,9 @@ inline constexpr const char* kRu[] = {
+     "Как быстро камера следует за мышью. 100% — значение по умолчанию.",  // MouseSensitivityDescription
+     "Показывать клавиши в текстах",  // KeyPromptsLabel
+     "Показывает назначенные клавиши вместо кнопок контроллера в подсказках и обучении, например [Space] для A. Работает с английским текстом игры и модами перевода.",  // KeyPromptsDescription
++    "Кнопки в текстах",  // ControllerPromptsLabel
++    "Кнопки контроллера в подсказках и обучении игры. «Автоматически» показывает кнопки PlayStation, например [Cross] для A, если первый подключённый контроллер — DualShock 4 или другой контроллер PlayStation. Работает с английским текстом игры и модами перевода; если включён показ клавиш в текстах, режим клавиатуры и мыши показывает клавиши.",  // ControllerPromptsDescription
++    "Автоматически",  // ControllerPromptsAuto
+     "Клавиши",  // KeysLabel
+     "Клавиши и кнопки мыши для каждой кнопки геймпада, по две на кнопку.",  // KeysDescription
+     "Назначить клавиши…",  // MapKeysButton
+diff --git a/launcher/src/localization.cpp b/launcher/src/localization.cpp
+index f29e4c0..afbd277 100644
+--- a/launcher/src/localization.cpp
++++ b/launcher/src/localization.cpp
+@@ -208,6 +208,9 @@ const char* const kStringsEn[] = {
+     "How fast the camera follows the mouse. 100% is the default.",
+     "Show keys in game texts",
+     "Shows the bound keys instead of controller buttons in the game's hints and tutorials, such as [Space] for A. Works with English game text and translation mods.",
++    "Controller prompts",
++    "The controller buttons shown in the game's hints and tutorials. Automatic shows the PlayStation buttons, such as [Cross] for A, when the first connected controller is a DualShock 4 or another PlayStation controller. Works with English game text and translation mods; with keys shown in game texts, keyboard and mouse mode shows the keys instead.",
++    "Automatic",
+     "Keys",
+     "The keys and mouse buttons for each controller input, two per input.",
+     "Map keys…",
+@@ -467,6 +470,9 @@ const char* const kStringsPtBr[] = {
+     "A velocidade com que a câmera segue o mouse. 100% é o padrão.",
+      "Mostrar teclas nos textos",
+      "Mostra as teclas configuradas no lugar dos botões do controle nas dicas e tutoriais do jogo, como [Space] para A. Funciona com o texto do jogo em inglês e com mods de tradução.",
++    "Botões nos textos",
++    "Os botões do controle mostrados nas dicas e tutoriais do jogo. Automático mostra os botões de PlayStation, como [Cross] para A, quando o primeiro controle conectado é um DualShock 4 ou outro controle de PlayStation. Funciona com o texto do jogo em inglês e com mods de tradução; com as teclas nos textos, o modo teclado e mouse mostra as teclas.",
++    "Automático",
+     "Teclas",
+     "As teclas e os botões do mouse de cada comando do controle, dois por comando.",
+     "Mapear teclas…",
+diff --git a/launcher/src/localization.h b/launcher/src/localization.h
+index 4d08902..ca93e74 100644
+--- a/launcher/src/localization.h
++++ b/launcher/src/localization.h
+@@ -189,6 +189,9 @@ enum class TextId {
+   MouseSensitivityDescription,
+   KeyPromptsLabel,
+   KeyPromptsDescription,
++  ControllerPromptsLabel,
++  ControllerPromptsDescription,
++  ControllerPromptsAuto,
+   KeysLabel,
+   KeysDescription,
+   MapKeysButton,
+diff --git a/launcher/src/pages/settings.cpp b/launcher/src/pages/settings.cpp
+index 64625aa..65f344e 100644
+--- a/launcher/src/pages/settings.cpp
++++ b/launcher/src/pages/settings.cpp
+@@ -45,6 +45,10 @@ constexpr Option kDither{TextId::DitherLabel, TextId::DitherDescription, Rendere
+ 
+ constexpr Option kSdlInput{TextId::SdlInputLabel, TextId::SdlInputDescription};
+ constexpr Option kController{TextId::ControllerLabel, TextId::ControllerDescription};
++constexpr Option kControllerPrompts{TextId::ControllerPromptsLabel,
++                                    TextId::ControllerPromptsDescription};
++// The controller_prompts values, in the order of the option's items.
++constexpr const char* kControllerPromptValues[] = {"auto", "xbox", "playstation"};
+ constexpr Option kKeyboardMouse{TextId::KeyboardMouseLabel, TextId::KeyboardMouseDescription};
+ constexpr Option kMouseCamera{TextId::MouseCameraLabel, TextId::MouseCameraDescription};
+ constexpr Option kMouseSensitivity{TextId::MouseSensitivityLabel, TextId::MouseSensitivityDescription};
+@@ -199,6 +203,14 @@ void RenderControlsGroup(OptionList& list, PageContext& context) {
+   bool sdl = config.input_backend != "xinput";
+   if (list.Checkbox(kSdlInput, sdl)) config.input_backend = sdl ? "sdl" : "xinput";
+   list.Text(kController, ControllerName().c_str());
++  const char* prompts[] = {Tr(TextId::ControllerPromptsAuto), "Xbox", "PlayStation (DualShock 4)"};
++  // A value set by hand that the game does not know reads as automatic, as in the game.
++  const auto saved = std::find(std::begin(kControllerPromptValues), std::end(kControllerPromptValues),
++                               config.controller_prompts);
++  int prompt = saved == std::end(kControllerPromptValues)
++                   ? 0
++                   : static_cast<int>(std::distance(std::begin(kControllerPromptValues), saved));
++  if (list.Combo(kControllerPrompts, prompt, prompts)) config.controller_prompts = kControllerPromptValues[prompt];
+   list.Checkbox(kKeyboardMouse, config.mnk_mode);
+   // The mouse and the keys count only in keyboard and mouse mode.
+   ImGui::BeginDisabled(!config.mnk_mode);
+-- 
+2.43.0
+
