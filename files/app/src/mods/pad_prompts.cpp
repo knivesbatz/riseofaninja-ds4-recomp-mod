@@ -12,7 +12,7 @@ namespace {
 constexpr std::pair<std::string_view, std::string_view> kButtons[] = {
     {"a", "Cross"},  {"b", "Circle"}, {"x", "Square"},  {"y", "Triangle"},
     {"lb", "L1"},    {"rb", "R1"},    {"lt", "L2"},     {"rt", "R2"},
-    {"start", "Options"},            {"back", "Share"},
+    {"start", "Options"},            {"back", "Touchpad"},
 };
 
 // The directions of the combo tags ("<x-left>"), each also a stick tag of its
@@ -105,6 +105,31 @@ std::string ReplaceButtonTags(std::string_view text, const key_prompts::Labels& 
     const auto replacement = replace(text.substr(open + 1, close - open - 1));
     if (!replacement.empty())
       out += replacement;
+    else
+      out.append(text.substr(open, close - open + 1));
+    at = close + 1;
+  }
+  out.append(text.substr(at));
+  return out;
+}
+
+std::string ReplaceShoulderTags(std::string_view text) {
+  static const key_prompts::Labels glyphs = {{"lb", std::string(kL1Glyph)},
+                                             {"rb", std::string(kR1Glyph)}};
+  std::string out;
+  out.reserve(text.size());
+  size_t at = 0;
+  while (at < text.size()) {
+    const size_t open = text.find('<', at);
+    if (open == std::string_view::npos)
+      break;
+    const size_t close = text.find('>', open + 1);
+    if (close == std::string_view::npos)
+      break;
+    out.append(text.substr(at, open - at));
+    const auto found = glyphs.find(text.substr(open + 1, close - open - 1));
+    if (found != glyphs.end())
+      out += found->second;
     else
       out.append(text.substr(open, close - open + 1));
     at = close + 1;

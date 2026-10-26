@@ -1,58 +1,69 @@
-From eaf642d6c3bb65ef0126c4ed332b52c0a63fcfdf Mon Sep 17 00:00:00 2001
+From 3b2f51dcf8403fe794eda810a9acdcb44960945d Mon Sep 17 00:00:00 2001
 From: knivesbatz <knivesbatz@users.noreply.github.com>
-Date: Mon, 26 Oct 2026 06:22:28 +0000
+Date: Mon, 26 Oct 2026 06:46:09 +0000
 Subject: [PATCH] Add PlayStation (DualShock 4) button prompts in game texts
 
 With a DualShock 4 or another PlayStation controller, the button tags of
-the game's hints and tutorials name the PlayStation buttons in place of
-the Xbox icons: <a> -> [Cross], <b> -> [Circle], <x> -> [Square],
-<y> -> [Triangle], <lb>/<rb> -> [L1]/[R1], <lt>/<rt> -> [L2]/[R2],
-<start>/<back> -> [Options]/[Share]. Stick and d-pad icons stay; combo
-tags such as <x-left> become <analogleft>+[Square].
+the game's hints and tutorials show the PlayStation buttons in place of
+the Xbox icons. controller_prompts = "auto" (default) follows the type
+SDL reports for the first connected controller; "xbox" and
+"playstation" force a style. The launcher offers it under Settings ->
+Controls in all seven languages. Keyboard prompts keep priority in
+keyboard and mouse mode.
 
-controller_prompts = "auto" (default) follows the type SDL reports for
-the first connected controller; "xbox" and "playstation" force a style.
-The launcher offers it under Settings -> Controls in all seven
-languages. Keyboard prompts keep priority in keyboard and mouse mode.
+With the DualShock 4 icon pack installed in naruto.bf (it leaves
+ds4_icons.installed next to the executable), the game's own icons are
+PlayStation ones: the tags stay icons, and only <lb>/<rb>, which share
+the font's shoulder icon with <lt>/<rt>, move to the pack's L1/R1
+glyphs (U+008B/U+008E). Without the pack, the buttons are written as
+names: <a> -> [Cross], <b> -> [Circle], <x> -> [Square],
+<y> -> [Triangle], <lb>/<rb> -> [L1]/[R1], <lt>/<rt> -> [L2]/[R2],
+<start>/<back> -> [Options]/[Touchpad]; combo tags such as <x-left>
+become <analogleft>+[Square].
+
+The SDK patch sdl-touchpad-as-back.patch maps the PlayStation touchpad
+click to Back (it was Guide, ignored unless guide_button is on).
 
 Built on the translation mod's text-table hook, so it works with the
 English game text and with translation mods, on both renderers.
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Fpb2rxNJzQBH2MVFpEwjo7
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DN7VURiM9rbjzNTpEsgAkr
 ---
- README.md                        |   1 +
- app/CMakeLists.txt               |   4 ++
- app/narutorise.toml              |   6 ++
- app/src/mods/pad_prompts.cpp     | 116 +++++++++++++++++++++++++++++++
- app/src/mods/pad_prompts.h       |  36 ++++++++++
- app/src/mods/translation_mod.cpp |  74 ++++++++++++++++++++
- app/tests/pad_prompts_test.cpp   | 100 ++++++++++++++++++++++++++
- docs/configuration.md            |  21 ++++++
- launcher/src/config_manager.cpp  |   2 +
- launcher/src/config_manager.h    |   3 +
- launcher/src/locales/de.h        |   3 +
- launcher/src/locales/es.h        |   3 +
- launcher/src/locales/fr.h        |   3 +
- launcher/src/locales/it.h        |   3 +
- launcher/src/locales/ru.h        |   3 +
- launcher/src/localization.cpp    |   6 ++
- launcher/src/localization.h      |   3 +
- launcher/src/pages/settings.cpp  |  12 ++++
- 18 files changed, 399 insertions(+)
+ README.md                              |   1 +
+ app/CMakeLists.txt                     |   4 +
+ app/narutorise.toml                    |   8 ++
+ app/src/mods/pad_prompts.cpp           | 141 +++++++++++++++++++++++++
+ app/src/mods/pad_prompts.h             |  50 +++++++++
+ app/src/mods/translation_mod.cpp       |  84 +++++++++++++++
+ app/tests/pad_prompts_test.cpp         | 111 +++++++++++++++++++
+ docs/configuration.md                  |  35 ++++++
+ launcher/src/config_manager.cpp        |   2 +
+ launcher/src/config_manager.h          |   3 +
+ launcher/src/locales/de.h              |   3 +
+ launcher/src/locales/es.h              |   3 +
+ launcher/src/locales/fr.h              |   3 +
+ launcher/src/locales/it.h              |   3 +
+ launcher/src/locales/ru.h              |   3 +
+ launcher/src/localization.cpp          |   6 ++
+ launcher/src/localization.h            |   3 +
+ launcher/src/pages/settings.cpp        |  12 +++
+ patches/sdk/sdl-touchpad-as-back.patch |  16 +++
+ 19 files changed, 491 insertions(+)
  create mode 100644 app/src/mods/pad_prompts.cpp
  create mode 100644 app/src/mods/pad_prompts.h
  create mode 100644 app/tests/pad_prompts_test.cpp
+ create mode 100644 patches/sdk/sdl-touchpad-as-back.patch
 
 diff --git a/README.md b/README.md
-index 1c4c3a1..be19764 100644
+index 1c4c3a1..ca8b175 100644
 --- a/README.md
 +++ b/README.md
 @@ -51,6 +51,7 @@ The current build and distribution workflow targets **Windows x64**. Presets for
  - **DLC support**, with launcher import and STFS package installation at game startup. Character DLCs use additional recompiled engine modules.
  - **Game language selection**, with English, French, German, Spanish, and Italian options in the launcher; available text and voices depend on your game files.
  - **External translation mods**, selected in the launcher's game language list, with UTF-8 text replacements by ID and fallback to the original English text. Releases include the complete Brazilian Portuguese package. See the [translation mod guide](docs/translation-mods.md).
-+- **PlayStation button prompts**: with a DualShock 4 or another PlayStation controller, the game's hints and tutorials name its buttons ("Press [Cross] to jump"), automatically or always, from the launcher. See [PlayStation button prompts](docs/configuration.md#playstation-button-prompts).
++- **PlayStation button prompts**: with a DualShock 4 or another PlayStation controller, the game's hints and tutorials show its buttons, as real ✕ ○ □ △ icons with the DualShock 4 icon pack or as names ("Press [Cross] to jump") without it, automatically or always, from the launcher. The touchpad acts as Back. See [PlayStation button prompts](docs/configuration.md#playstation-button-prompts).
  
  **Launcher and distribution**
  
@@ -79,28 +90,30 @@ index 8594a1e..9e642c5 100644
  add_executable(narutorise_validate_translation_package EXCLUDE_FROM_ALL
      ../tools/localization/validate-package.cpp src/mods/translation_data.cpp)
 diff --git a/app/narutorise.toml b/app/narutorise.toml
-index fa1506c..7330237 100644
+index fa1506c..a1f8c95 100644
 --- a/app/narutorise.toml
 +++ b/app/narutorise.toml
-@@ -30,6 +30,12 @@ log_level = "info"
+@@ -30,6 +30,14 @@ log_level = "info"
  protect_zero = false
  
  input_backend = "sdl"
 +# Controller buttons in the game's hints and tutorials: "auto" shows the
 +# PlayStation buttons ("Press [Cross] to jump") when the first connected
 +# controller is a DualShock 4 or another PlayStation pad, "xbox" keeps the
-+# game's icons, "playstation" always shows the PlayStation buttons. English game
-+# text only; with mnk_mode and mnk_key_prompts, the keys take their place.
++# game's icons, "playstation" always shows the PlayStation buttons. With the
++# DualShock 4 icon pack installed (ds4_icons.installed next to the executable)
++# the icons themselves are PlayStation ones and stay icons. English game text
++# only; with mnk_mode and mnk_key_prompts, the keys take their place.
 +controller_prompts = "auto"
  # Keyboard and mouse as a controller, next to a connected one. While exploring,
  # the mouse turns the camera itself at mnk_sensitivity (1.0 = 100%, about one
  # turn every 2,100 pixels); elsewhere it stands in for the right stick.
 diff --git a/app/src/mods/pad_prompts.cpp b/app/src/mods/pad_prompts.cpp
 new file mode 100644
-index 0000000..d8f01b2
+index 0000000..b20f5fe
 --- /dev/null
 +++ b/app/src/mods/pad_prompts.cpp
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,141 @@
 +#include "mods/pad_prompts.h"
 +
 +#include <array>
@@ -115,7 +128,7 @@ index 0000000..d8f01b2
 +constexpr std::pair<std::string_view, std::string_view> kButtons[] = {
 +    {"a", "Cross"},  {"b", "Circle"}, {"x", "Square"},  {"y", "Triangle"},
 +    {"lb", "L1"},    {"rb", "R1"},    {"lt", "L2"},     {"rt", "R2"},
-+    {"start", "Options"},            {"back", "Share"},
++    {"start", "Options"},            {"back", "Touchpad"},
 +};
 +
 +// The directions of the combo tags ("<x-left>"), each also a stick tag of its
@@ -216,13 +229,38 @@ index 0000000..d8f01b2
 +  return out;
 +}
 +
++std::string ReplaceShoulderTags(std::string_view text) {
++  static const key_prompts::Labels glyphs = {{"lb", std::string(kL1Glyph)},
++                                             {"rb", std::string(kR1Glyph)}};
++  std::string out;
++  out.reserve(text.size());
++  size_t at = 0;
++  while (at < text.size()) {
++    const size_t open = text.find('<', at);
++    if (open == std::string_view::npos)
++      break;
++    const size_t close = text.find('>', open + 1);
++    if (close == std::string_view::npos)
++      break;
++    out.append(text.substr(at, open - at));
++    const auto found = glyphs.find(text.substr(open + 1, close - open - 1));
++    if (found != glyphs.end())
++      out += found->second;
++    else
++      out.append(text.substr(open, close - open + 1));
++    at = close + 1;
++  }
++  out.append(text.substr(at));
++  return out;
++}
++
 +}  // namespace narutorise::pad_prompts
 diff --git a/app/src/mods/pad_prompts.h b/app/src/mods/pad_prompts.h
 new file mode 100644
-index 0000000..e28e9a1
+index 0000000..84c7163
 --- /dev/null
 +++ b/app/src/mods/pad_prompts.h
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,50 @@
 +#pragma once
 +
 +// PlayStation prompts: with a DualShock 4 (or another PlayStation pad) the
@@ -231,7 +269,12 @@ index 0000000..e28e9a1
 +// position (SDL's south button is A), so <a> is Cross, <x> Square, <lb> L1 and
 +// so on. Sticks and the d-pad keep their icons, which do not name a pad; a
 +// combo tag ("<x-left>") becomes its stick icon and the button ("<analogleft>+
-+// [Square]"). Colour, line break and currency tags stay.
++// [Square]"). Colour, line break and currency tags stay. Back is the touchpad.
++//
++// With the DualShock 4 icon pack (tools/ds4-icons) installed in naruto.bf, the
++// game's own icons are PlayStation ones and the tags stay icons; only <lb> and
++// <rb>, which share the shoulder icon with <lt> and <rt> in the game's font,
++// move to the pack's L1 and R1 glyphs.
 +//
 +// Pure functions without SDK dependencies, so the host test can check them.
 +
@@ -258,12 +301,21 @@ index 0000000..e28e9a1
 +// tags, unknown tags and unterminated '<' are kept byte for byte.
 +std::string ReplaceButtonTags(std::string_view text, const key_prompts::Labels& labels);
 +
++// The font glyphs the icon pack draws L1 and R1 in: the game's French shoulder
++// glyphs, U+008B and U+008E, unused by English texts.
++inline constexpr std::string_view kL1Glyph = "\xC2\x8B";
++inline constexpr std::string_view kR1Glyph = "\xC2\x8E";
++
++// The text with <lb> and <rb> replaced by the icon pack's L1 and R1 glyphs;
++// every other tag is kept byte for byte.
++std::string ReplaceShoulderTags(std::string_view text);
++
 +}  // namespace narutorise::pad_prompts
 diff --git a/app/src/mods/translation_mod.cpp b/app/src/mods/translation_mod.cpp
-index 15ad1dd..582e0c6 100644
+index 15ad1dd..49e697b 100644
 --- a/app/src/mods/translation_mod.cpp
 +++ b/app/src/mods/translation_mod.cpp
-@@ -33,11 +33,14 @@
+@@ -33,11 +33,15 @@
  #include <rex/system/thread_state.h>
  #include <rex/system/xmemory.h>
  
@@ -271,6 +323,7 @@ index 15ad1dd..582e0c6 100644
 +
  #include <atomic>
  #include <cstring>
++#include <filesystem>
  #include <mutex>
  
  #include "mods/key_prompts.h"
@@ -278,7 +331,7 @@ index 15ad1dd..582e0c6 100644
  #include "mods/translation_data.h"
  
  REXCVAR_DEFINE_STRING(translation_mod, "", "Mods",
-@@ -48,6 +51,11 @@ REXCVAR_DEFINE_BOOL(mnk_key_prompts, true, "Input",
+@@ -48,6 +52,11 @@ REXCVAR_DEFINE_BOOL(mnk_key_prompts, true, "Input",
                      "With keyboard and mouse on, show the bound keys instead of controller button "
                      "icons in game texts. Requires restart and English game language.")
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -290,7 +343,7 @@ index 15ad1dd..582e0c6 100644
  
  extern "C" void __imp__sub_8264E3A8(PPCContext& __restrict, uint8_t*);
  extern "C" void __imp__sub_82687C98(PPCContext& __restrict, uint8_t*);
-@@ -84,6 +92,71 @@ void InitializeKeyPrompts() {
+@@ -84,6 +93,80 @@ void InitializeKeyPrompts() {
    }
  }
  
@@ -326,8 +379,9 @@ index 15ad1dd..582e0c6 100644
 +
 +// Xbox button icons become the PlayStation buttons in their place, unless the
 +// keys took them. Chosen once, like the key prompts: a pad connected later
-+// applies on the next start.
-+void InitializePadPrompts() {
++// applies on the next start. The icon pack's installer leaves a marker next to
++// the executable; with it, the icons themselves are PlayStation ones.
++void InitializePadPrompts(const std::filesystem::path& executable_root) {
 +  if (prompt_transform)
 +    return;  // Keyboard and mouse mode shows the keys.
 +  const std::string value = REXCVAR_GET(controller_prompts);
@@ -352,6 +406,14 @@ index 15ad1dd..582e0c6 100644
 +    }
 +    REXLOG_INFO("[pad prompts] PlayStation controller \"{}\" detected", name);
 +  }
++  std::error_code error;
++  if (std::filesystem::exists(executable_root / "ds4_icons.installed", error)) {
++    REXLOG_INFO("[pad prompts] DualShock 4 icon pack installed: icons kept, <lb>/<rb> -> L1/R1");
++    prompt_transform = [](std::string_view text) {
++      return pad_prompts::ReplaceShoulderTags(text);
++    };
++    return;
++  }
 +  for (const auto& [tag, label] : pad_prompts::PlayStationLabels())
 +    REXLOG_INFO("[pad prompts] <{}> -> [{}]", tag, label);
 +  prompt_transform = [](std::string_view text) {
@@ -362,20 +424,20 @@ index 15ad1dd..582e0c6 100644
  void LoadSelectedPackage(const std::filesystem::path& executable_root) {
    const std::string selected = REXCVAR_GET(translation_mod);
    if (selected.empty())
-@@ -187,6 +260,7 @@ void Initialize(const std::filesystem::path& executable_root) {
+@@ -187,6 +270,7 @@ void Initialize(const std::filesystem::path& executable_root) {
    std::call_once(initialized, [&] {
      LoadSelectedPackage(executable_root);
      InitializeKeyPrompts();
-+    InitializePadPrompts();
++    InitializePadPrompts(executable_root);
      enabled.store(!package.texts.empty() || static_cast<bool>(prompt_transform),
                    std::memory_order_release);
    });
 diff --git a/app/tests/pad_prompts_test.cpp b/app/tests/pad_prompts_test.cpp
 new file mode 100644
-index 0000000..4b61caf
+index 0000000..165f20e
 --- /dev/null
 +++ b/app/tests/pad_prompts_test.cpp
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,111 @@
 +#include <iostream>
 +#include <stdexcept>
 +#include <string>
@@ -427,7 +489,7 @@ index 0000000..4b61caf
 +  Equal(labels.at("lt"), "L2", "LT");
 +  Equal(labels.at("rt"), "R2", "RT");
 +  Equal(labels.at("start"), "Options", "Start");
-+  Equal(labels.at("back"), "Share", "Back");
++  Equal(labels.at("back"), "Touchpad", "Back is the touchpad");
 +  Check(!labels.contains("analogup") && !labels.contains("leftanalog") && !labels.contains("dpad"),
 +        "sticks and d-pad keep their icons");
 +}
@@ -441,7 +503,7 @@ index 0000000..4b61caf
 +  Equal(Replace("Press <lt> <analogright><analogleft> <analogup><analogup>."),
 +        "Press [L2] <analogright><analogleft> <analogup><analogup>.", "jutsu motions keep icons");
 +  Equal(Replace("Press <lb> to open the inventory, <start> to pause, <back> for the map."),
-+        "Press [L1] to open the inventory, [Options] to pause, [Share] for the map.",
++        "Press [L1] to open the inventory, [Options] to pause, [Touchpad] for the map.",
 +        "shoulder and menu buttons");
 +  Equal(Replace("Steer with <leftanalog>, pick with <dpad>."),
 +        "Steer with <leftanalog>, pick with <dpad>.", "group tags keep icons");
@@ -462,6 +524,16 @@ index 0000000..4b61caf
 +  Equal(Replace("Pressione <a> para pular."), "Pressione [Cross] para pular.",
 +        "translated text keeps working");
 +}
++
++void ShoulderTests() {
++  Equal(ReplaceShoulderTags("Press <lb> to open the inventory."),
++        "Press \xC2\x8B to open the inventory.", "LB is the L1 glyph");
++  Equal(ReplaceShoulderTags("<rb>Throw Kunai"), "\xC2\x8EThrow Kunai", "RB is the R1 glyph");
++  Equal(ReplaceShoulderTags("Hold <lt> and <rt>, then <a> <x-left> <analogup>"),
++        "Hold <lt> and <rt>, then <a> <x-left> <analogup>", "other tags stay icons");
++  Equal(ReplaceShoulderTags("<LB> <lb"), "<LB> <lb", "case-sensitive, unterminated kept");
++  Equal(ReplaceShoulderTags(""), "", "empty text");
++}
 +}  // namespace
 +
 +int main() {
@@ -469,6 +541,7 @@ index 0000000..4b61caf
 +    SettingTests();
 +    LabelTests();
 +    ReplaceTests();
++    ShoulderTests();
 +    std::cout << "pad prompts PASS checks=" << checks << '\n';
 +    return 0;
 +  } catch (const std::exception& error) {
@@ -477,16 +550,16 @@ index 0000000..4b61caf
 +  }
 +}
 diff --git a/docs/configuration.md b/docs/configuration.md
-index 83cd51f..aa392ec 100644
+index 83cd51f..0c4d2b9 100644
 --- a/docs/configuration.md
 +++ b/docs/configuration.md
-@@ -150,6 +150,27 @@ The launcher enumerates graphics cards through the selected API (**Settings →
+@@ -150,6 +150,41 @@ The launcher enumerates graphics cards through the selected API (**Settings →
  
  The executable also exports `NvOptimusEnablement` and `AmdPowerXpressRequestHighPerformance`, so hybrid laptops (NVIDIA Optimus, AMD PowerXpress) run the game on the dedicated card. The log names the card in use: `DXGI adapter:` for Xenos, `Native renderer adapter:` for the native renderer.
  
 +## PlayStation button prompts
 +
-+With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutorials can name the PlayStation buttons in place of the Xbox button icons: "Press [Cross] to jump", "Hold [L2] and perform the hand seals". Choose it under **Settings → Controls → Controller prompts**:
++With a DualShock 4 (or a DualSense or DualShock 3), the game's hints and tutorials can show the PlayStation buttons in place of the Xbox ones. Choose it under **Settings → Controls → Controller prompts**:
 +
 +| Choice | `controller_prompts` | Effect |
 +| --- | --- | --- |
@@ -494,16 +567,30 @@ index 83cd51f..aa392ec 100644
 +| Xbox | `"xbox"` | The game's icons |
 +| PlayStation (DualShock 4) | `"playstation"` | PlayStation buttons with any controller |
 +
++### With the DualShock 4 icon pack (recommended)
++
++The icon pack (`tools/ds4-icons` in the DS4 prompts mod) redraws the button icons inside the game's `naruto.bf`: the font's A/B/X/Y become ✕ ○ □ △, the shoulder icons L2/R2 and L1/R1, the stick icons L/R sticks, and the large HUD buttons PlayStation ones. Its installer leaves `ds4_icons.installed` next to `narutorise.exe`; when the PlayStation style is chosen and that file exists, the texts keep their icons and only `<lb>`/`<rb>` move to the pack's L1/R1 glyphs (the game's font has one shoulder icon per side, which the pack draws as L2/R2 for `<lt>`/`<rt>`).
++
++The pack changes the game files themselves, so its icons show whatever the setting; run `ds4_icons.py restore` to bring back the Xbox icons.
++
++### Without the icon pack
++
++The buttons are written as words, because the game's fonts have no cross, circle, square or triangle symbols:
++
 +| Game tag | Shown as |
 +| --- | --- |
 +| A / B / X / Y | [Cross] / [Circle] / [Square] / [Triangle] |
 +| LB / RB | [L1] / [R1] |
 +| LT / RT | [L2] / [R2] |
-+| Start / Back | [Options] / [Share] |
++| Start / Back | [Options] / [Touchpad] |
 +
-+The buttons are written as words, because the game's fonts have no cross, circle, square or triangle symbols. Stick and d-pad icons do not name a controller and stay; a combo such as Left + X shows the stick icon followed by `+[Square]`. The choice is made when the game starts: connect the controller before launching it. The prompts need the English game text, with or without a translation mod. With **Keyboard and mouse** and **Show keys in game texts** on, the game texts show the keys instead.
++Stick and d-pad icons do not name a controller and stay; a combo such as Left + X shows the stick icon followed by `+[Square]`.
 +
-+Only the texts with button tags change: button icons the game draws as images, outside its texts, stay Xbox ones. If Steam Input presents the DualShock 4 as an Xbox controller, Automatic sees an Xbox controller; choose PlayStation instead. The game log lists the choice under `[pad prompts]`.
++### Both
++
++The choice is made when the game starts: connect the controller before launching it. The prompts need the English game text, with or without a translation mod. With **Keyboard and mouse** and **Show keys in game texts** on, the game texts show the keys instead. If Steam Input presents the DualShock 4 as an Xbox controller, Automatic sees an Xbox controller; choose PlayStation instead. The game log lists the choice under `[pad prompts]`.
++
++Pressing the DualShock 4 touchpad acts as the Xbox Back button (the SDK patch `patches/sdk/sdl-touchpad-as-back.patch`); Share still works as Back too.
 +
  ## Keyboard and mouse
  
@@ -680,6 +767,28 @@ index 64625aa..65f344e 100644
    list.Checkbox(kKeyboardMouse, config.mnk_mode);
    // The mouse and the keys count only in keyboard and mouse mode.
    ImGui::BeginDisabled(!config.mnk_mode);
+diff --git a/patches/sdk/sdl-touchpad-as-back.patch b/patches/sdk/sdl-touchpad-as-back.patch
+new file mode 100644
+index 0000000..64f4c1e
+--- /dev/null
++++ b/patches/sdk/sdl-touchpad-as-back.patch
+@@ -0,0 +1,16 @@
++diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
++index c7c440d..a4bf0c3 100644
++--- a/src/input/sdl/sdl_input_driver.cpp
+++++ b/src/input/sdl/sdl_input_driver.cpp
++@@ -554,8 +554,9 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& even
++           X_INPUT_GAMEPAD_B,
++           X_INPUT_GAMEPAD_X,
++           X_INPUT_GAMEPAD_A,
++-          // PS touchpad button
++-          X_INPUT_GAMEPAD_GUIDE,
+++          // PS touchpad button: Back, the button the PlayStation prompts
+++          // show as the touchpad (Share stays Back too).
+++          X_INPUT_GAMEPAD_BACK,
++       };
++   static_assert(SDL_GAMEPAD_BUTTON_SOUTH == 0);
++   static_assert(SDL_GAMEPAD_BUTTON_DPAD_RIGHT == 14);
 -- 
 2.43.0
 

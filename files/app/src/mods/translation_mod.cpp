@@ -37,6 +37,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 
 #include "mods/key_prompts.h"
@@ -124,8 +125,9 @@ bool PlayStationPadConnected(std::string& name) {
 
 // Xbox button icons become the PlayStation buttons in their place, unless the
 // keys took them. Chosen once, like the key prompts: a pad connected later
-// applies on the next start.
-void InitializePadPrompts() {
+// applies on the next start. The icon pack's installer leaves a marker next to
+// the executable; with it, the icons themselves are PlayStation ones.
+void InitializePadPrompts(const std::filesystem::path& executable_root) {
   if (prompt_transform)
     return;  // Keyboard and mouse mode shows the keys.
   const std::string value = REXCVAR_GET(controller_prompts);
@@ -149,6 +151,14 @@ void InitializePadPrompts() {
       return;
     }
     REXLOG_INFO("[pad prompts] PlayStation controller \"{}\" detected", name);
+  }
+  std::error_code error;
+  if (std::filesystem::exists(executable_root / "ds4_icons.installed", error)) {
+    REXLOG_INFO("[pad prompts] DualShock 4 icon pack installed: icons kept, <lb>/<rb> -> L1/R1");
+    prompt_transform = [](std::string_view text) {
+      return pad_prompts::ReplaceShoulderTags(text);
+    };
+    return;
   }
   for (const auto& [tag, label] : pad_prompts::PlayStationLabels())
     REXLOG_INFO("[pad prompts] <{}> -> [{}]", tag, label);
@@ -260,7 +270,7 @@ void Initialize(const std::filesystem::path& executable_root) {
   std::call_once(initialized, [&] {
     LoadSelectedPackage(executable_root);
     InitializeKeyPrompts();
-    InitializePadPrompts();
+    InitializePadPrompts(executable_root);
     enabled.store(!package.texts.empty() || static_cast<bool>(prompt_transform),
                   std::memory_order_release);
   });

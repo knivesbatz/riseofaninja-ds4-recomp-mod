@@ -49,7 +49,7 @@ void LabelTests() {
   Equal(labels.at("lt"), "L2", "LT");
   Equal(labels.at("rt"), "R2", "RT");
   Equal(labels.at("start"), "Options", "Start");
-  Equal(labels.at("back"), "Share", "Back");
+  Equal(labels.at("back"), "Touchpad", "Back is the touchpad");
   Check(!labels.contains("analogup") && !labels.contains("leftanalog") && !labels.contains("dpad"),
         "sticks and d-pad keep their icons");
 }
@@ -63,7 +63,7 @@ void ReplaceTests() {
   Equal(Replace("Press <lt> <analogright><analogleft> <analogup><analogup>."),
         "Press [L2] <analogright><analogleft> <analogup><analogup>.", "jutsu motions keep icons");
   Equal(Replace("Press <lb> to open the inventory, <start> to pause, <back> for the map."),
-        "Press [L1] to open the inventory, [Options] to pause, [Share] for the map.",
+        "Press [L1] to open the inventory, [Options] to pause, [Touchpad] for the map.",
         "shoulder and menu buttons");
   Equal(Replace("Steer with <leftanalog>, pick with <dpad>."),
         "Steer with <leftanalog>, pick with <dpad>.", "group tags keep icons");
@@ -84,6 +84,16 @@ void ReplaceTests() {
   Equal(Replace("Pressione <a> para pular."), "Pressione [Cross] para pular.",
         "translated text keeps working");
 }
+
+void ShoulderTests() {
+  Equal(ReplaceShoulderTags("Press <lb> to open the inventory."),
+        "Press \xC2\x8B to open the inventory.", "LB is the L1 glyph");
+  Equal(ReplaceShoulderTags("<rb>Throw Kunai"), "\xC2\x8EThrow Kunai", "RB is the R1 glyph");
+  Equal(ReplaceShoulderTags("Hold <lt> and <rt>, then <a> <x-left> <analogup>"),
+        "Hold <lt> and <rt>, then <a> <x-left> <analogup>", "other tags stay icons");
+  Equal(ReplaceShoulderTags("<LB> <lb"), "<LB> <lb", "case-sensitive, unterminated kept");
+  Equal(ReplaceShoulderTags(""), "", "empty text");
+}
 }  // namespace
 
 int main() {
@@ -91,6 +101,7 @@ int main() {
     SettingTests();
     LabelTests();
     ReplaceTests();
+    ShoulderTests();
     std::cout << "pad prompts PASS checks=" << checks << '\n';
     return 0;
   } catch (const std::exception& error) {
