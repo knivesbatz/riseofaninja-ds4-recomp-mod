@@ -10,8 +10,9 @@ run copies naruto.bf to naruto.bf.ds4bak; "restore" puts that copy back.
     python ds4_icons.py extract  "<game folder>" <out dir>   (originals, for compose_icons.py)
 
 <game folder> is the folder with narutorise.exe (or its "game" subfolder).
-Patched bigfile entries are appended to the end of naruto.bf and the entry's
-table offset and size are pointed at the copy; nothing else in the file moves.
+A patched bigfile entry is written back in its own place (the icons compress
+better than the Xbox ones, so it fits), with only the changed 128 KB chunks
+compressed again; its size in the file table is updated. Nothing moves.
 Pure Python 3, no packages needed.
 """
 import hashlib
@@ -84,20 +85,81 @@ def unpack(b):
     return bytes(out)
 
 
-def lzo1x_literal(data):
-    """An LZO1X stream that stores `data` as one literal run (valid for any
-    LZO1X decompressor, the game's included)."""
-    n = len(data)
+def lzo1x_compress(src):
+    """Greedy LZO1X compressor: M2/M3/M4 matches and literal runs, the
+    instructions the game's decompressor reads."""
+    n = len(src)
     out = bytearray()
-    if n <= 238:
-        out.append(n + 17)
-    else:
-        rest = n - 3 - 15
-        zeros = (rest - 1) // 255
-        out.append(0)
-        out += bytes(zeros)
-        out.append(rest - 255 * zeros)
-    out += data
+    last_match_at = -1   # index in out of the byte carrying the next lits count
+    lit_start = 0
+    ip = 0
+    table = {}
+    def emit_literals(end):
+        nonlocal last_match_at
+        L = end - lit_start
+        if L == 0:
+            return
+        if last_match_at < 0 and not out:
+            if L <= 238:
+                out.append(17 + L)
+            else:
+                rest = L - 3 - 15; z = (rest - 1) // 255
+                out.append(0); out.extend(bytes(z)); out.append(rest - 255 * z)
+        elif L <= 3:
+            out[last_match_at] |= L
+        elif L <= 18:
+            out.append(L - 3)
+        else:
+            rest = L - 3 - 15; z = (rest - 1) // 255
+            out.append(0); out.extend(bytes(z)); out.append(rest - 255 * z)
+        out.extend(src[lit_start:end])
+    while ip + 3 <= n:
+        key = src[ip:ip + 3]
+        cand = table.get(key)
+        table[key] = ip
+        if cand is not None and ip - cand <= 0xBFFF:
+            d = ip - cand
+            m = 3
+            lim = n - ip
+            while m < lim and src[cand + m] == src[ip + m]:
+                m += 1
+            if m < 4 and d > 2048:
+                ip += 1; continue
+            # Literal runs of 1..3 bytes need a previous match to carry them.
+            pending = ip - lit_start
+            if 1 <= pending <= 3 and last_match_at < 0 and out:
+                ip += 1; continue
+            emit_literals(ip)
+            if m <= 8 and d <= 2048:
+                out.append(((m - 1) << 5) | (((d - 1) & 7) << 2))
+                last_match_at = len(out) - 1
+                out.append((d - 1) >> 3)
+            elif d <= 16384:
+                if m - 2 <= 31:
+                    out.append(32 | (m - 2))
+                else:
+                    rest = m - 2 - 31; z = (rest - 1) // 255
+                    out.append(32); out.extend(bytes(z)); out.append(rest - 255 * z)
+                v = (d - 1) << 2
+                last_match_at = len(out)
+                out.append(v & 0xFF); out.append(v >> 8)
+            else:
+                dd = d - 0x4000
+                if m - 2 <= 7:
+                    out.append(16 | ((dd >> 11) & 8) | (m - 2))
+                else:
+                    rest = m - 2 - 7; z = (rest - 1) // 255
+                    out.append(16 | ((dd >> 11) & 8)); out.extend(bytes(z)); out.append(rest - 255 * z)
+                v = (dd & 0x3FFF) << 2
+                last_match_at = len(out)
+                out.append(v & 0xFF); out.append(v >> 8)
+            for k in range(ip + 1, min(ip + m, n - 2)):
+                table[src[k:k + 3]] = k
+            ip += m
+            lit_start = ip
+        else:
+            ip += 1
+    emit_literals(n)
     out += b'\x11\x00\x00'
     return bytes(out)
 
@@ -137,8 +199,10 @@ def repack(chs, old, new):
             body += struct.pack('<II', 0, 0)
             continue
         if old[pos:pos + un] != new[pos:pos + un]:
-            data = lzo1x_literal(new[pos:pos + un])
+            data = lzo1x_compress(new[pos:pos + un])
             assert lzo1x(data) == new[pos:pos + un]
+            if len(data) >= un:
+                raise ValueError('a patched chunk does not compress')
         body += struct.pack('<II', un, len(data)) + data
         pos += un
     assert pos == len(new)
@@ -273,11 +337,11 @@ def install(folder):
                 continue
             blob = repack(chs, u, bytes(new))
             assert unpack_chunks(chunks(blob)) == bytes(new)
-            f.seek(0, os.SEEK_END)
-            end = f.tell()
-            f.write(blob)
-            f.seek(fat_off + 8 * i)
-            f.write(struct.pack('<II', end, key))
+            if len(blob) > len(raw):
+                print(f'  {key:08x}: the patched entry is larger than the original, left alone')
+                continue
+            f.seek(off)
+            f.write(blob + bytes(len(raw) - len(blob)))
             f.seek(info_off + INFO_STRIDE * i)
             f.write(blob[:4])
             changed += 1

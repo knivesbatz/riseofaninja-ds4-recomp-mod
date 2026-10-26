@@ -29,7 +29,7 @@ The mod has two parts. Use the first alone, or both:
    python ds4_icons.py install "C:\Program Files (x86)\Steam\steamapps\common\NarutoRisePC"
    ```
 
-   The default port install is `%LOCALAPPDATA%\NarutoRisePC`. The first run backs up `game\naruto.bf` as `game\naruto.bf.ds4bak` (about 630 MB, so keep 1 GB free), then patches it. It takes a minute or two.
+   The default port install is `%LOCALAPPDATA%\NarutoRisePC`. The first run backs up `game\naruto.bf` as `game\naruto.bf.ds4bak` (about 630 MB, so keep 1 GB free), then patches it in place; its size does not change. It takes a minute or two.
 4. Play. To go back to the Xbox icons: `python ds4_icons.py restore "<same folder>"`.
 
 More detail in [tools/ds4-icons/README.md](tools/ds4-icons/README.md).

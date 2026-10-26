@@ -22,7 +22,7 @@ You need [Python 3](https://www.python.org/downloads/) (tick **Add python.exe to
 python ds4_icons.py install "C:\Program Files (x86)\Steam\steamapps\common\NarutoRisePC"
 ```
 
-Use the folder that has `narutorise.exe` (for the installer's default, `%LOCALAPPDATA%\NarutoRisePC`). The first run copies `game\naruto.bf` to `game\naruto.bf.ds4bak` (about 630 MB), then adds the patched parts at the end of `naruto.bf`. Running it again does nothing.
+Use the folder that has `narutorise.exe` (for the installer's default, `%LOCALAPPDATA%\NarutoRisePC`). The first run copies `game\naruto.bf` to `game\naruto.bf.ds4bak` (about 630 MB), then patches `naruto.bf` in place; its size does not change. Running it again does nothing.
 
 - `python ds4_icons.py status "<folder>"` counts the PlayStation and Xbox icons in the file.
 - `python ds4_icons.py restore "<folder>"` puts the backup back (Xbox icons).
@@ -31,7 +31,7 @@ The installer only changes textures whose bytes match the original game's, so ot
 
 ## What's in here
 
-- `ds4_icons.py`: the installer. Plain Python, no packages. It finds the bigfile entries holding the font atlas (`0x2F00E652`) and the HUD buttons (`0x1900001F`, `0x19000024`, `0x1900004E`, `0x1900004F`), pastes the icons into them, stores the changed 128 KB chunks again, appends the entries and points their table offset and size at the copies.
+- `ds4_icons.py`: the installer. Plain Python, no packages. It finds the bigfile entries holding the font atlas (`0x2F00E652`) and the HUD buttons (`0x1900001F`, `0x19000024`, `0x1900004E`, `0x1900004F`), pastes the icons into them, LZO-compresses the changed 128 KB chunks again and writes each entry back in its own place (the icons compress better than the originals, so it fits; an entry that would not fit is left alone), updating its size in the file table.
 - `data/`: the icons as raw pixel rectangles plus `manifest.json` (the checksums before and after). No game art is included; the installer builds the textures from your own copy.
 - `compose_icons.py` and `icons-src/`: how `data/` is made, from [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0, see `icons-src/LICENSE-Kenney.txt`). To change the icons: `python ds4_icons.py extract "<folder>" originals`, edit `compose_icons.py`, then `python compose_icons.py originals icons-src data` (needs Pillow).
 
