@@ -96,10 +96,11 @@ def unpack(b):
     return bytes(out)
 
 
-def lzo1x_compress(src, pad=0):
+def lzo1x_compress(src, pad=0, depth=1):
     """Greedy LZO1X compressor: M2/M3/M4 matches and literal runs, the
     instructions the game's decompressor reads. pad > 0 writes that many
-    short matches in the 1-byte-longer M3 form, to grow the output."""
+    short matches in the 1-byte-longer M3 form, to grow the output.
+    depth > 1 tries that many earlier places for each match (smaller, slower)."""
     n = len(src)
     out = bytearray()
     last_match_at = -1   # index in out of the byte carrying the next lits count
@@ -127,16 +128,25 @@ def lzo1x_compress(src, pad=0):
         out.extend(src[lit_start:end])
     while ip + 3 <= n:
         key = src[ip:ip + 3]
-        cand = table.get(key)
-        table[key] = ip
-        if cand is not None and ip - cand <= 0xBFFF:
+        cands = table.get(key)
+        if cands is None:
+            cands = table[key] = []
+        best = None
+        lim = n - ip
+        for cand in reversed(cands):
             d = ip - cand
+            if d > 0xBFFF:
+                break
             m = 3
-            lim = n - ip
             while m < lim and src[cand + m] == src[ip + m]:
                 m += 1
-            if m < 4 and d > 2048:
-                ip += 1; continue
+            if (m >= 4 or d <= 2048) and (best is None or m > best[0]):
+                best = (m, d)
+        cands.append(ip)
+        if len(cands) > depth:
+            del cands[0]
+        if best is not None:
+            m, d = best
             # Literal runs of 1..3 bytes need a previous match to carry them.
             pending = ip - lit_start
             if 1 <= pending <= 3 and last_match_at < 0 and out:
@@ -172,7 +182,10 @@ def lzo1x_compress(src, pad=0):
                 last_match_at = len(out)
                 out.append(v & 0xFF); out.append(v >> 8)
             for k in range(ip + 1, min(ip + m, n - 2)):
-                table[src[k:k + 3]] = k
+                c = table.setdefault(src[k:k + 3], [])
+                c.append(k)
+                if len(c) > depth:
+                    del c[0]
             ip += m
             lit_start = ip
         else:
@@ -182,16 +195,26 @@ def lzo1x_compress(src, pad=0):
     return bytes(out)
 
 
-def lzo1x_compress_to(src, size):
-    """src compressed to exactly size bytes."""
-    data = lzo1x_compress(src)
-    if len(data) > size:
+def lzo1x_compress_to(pieces, total):
+    """Each piece compressed, together exactly total bytes."""
+    depth = 1
+    while True:
+        sizes = [len(lzo1x_compress(p, 0, depth)) for p in pieces]
+        if sum(sizes) <= total or depth >= 64:
+            break
+        depth *= 4
+    if sum(sizes) > total:
         raise ValueError('does not fit')
-    data = lzo1x_compress(src, size - len(data))
-    if len(data) != size:
+    out = []
+    left = total - sum(sizes)
+    for p, size in zip(pieces, sizes):
+        data = lzo1x_compress(p, left, depth)
+        left -= len(data) - size
+        assert lzo1x(data) == p
+        out.append(data)
+    if left:
         raise ValueError('cannot pad to size')
-    assert lzo1x(data) == src
-    return data
+    return out
 
 
 def chunks(raw):
@@ -513,11 +536,11 @@ def same_size_entry(raw, chs, new):
     the entry and every table pointing at it stay as they are."""
     sizes = [len(data) for un, data in chs if un]
     pieces = [new[i:i + CHUNK] for i in range(0, len(new), CHUNK)]
-    if len(pieces) != len(sizes):
-        raise ValueError('the text no longer fits the same chunks')
+    # Each chunk has 8 bytes of header; the chunks share the stored bytes.
+    total = sum(sizes) + 8 * (len(sizes) - len(pieces))
     body = bytearray(raw[:4])
-    for piece, size in zip(pieces, sizes):
-        body += struct.pack('<II', len(piece), size) + lzo1x_compress_to(piece, size)
+    for piece, data in zip(pieces, lzo1x_compress_to(pieces, total)):
+        body += struct.pack('<II', len(piece), len(data)) + data
     body += struct.pack('<I', 0) + raw[-4:]
     assert len(body) == len(raw) and unpack_chunks(chunks(bytes(body))) == new
     return bytes(body)
@@ -702,13 +725,13 @@ def status(folder):
                 counts['patched' if now == patch[k][1] else 'original' if now == patch[k][0] else 'other'] += 1
         done, left = text_status(f, fat)
     print(f'naruto.bf textures: {counts["patched"]} PlayStation, {counts["original"]} Xbox, {counts["other"]} unknown.')
-    print(f'naruto.bf text: {done} languages with PSN names, {left} strings still naming Xbox.')
+    print(f'naruto.bf text: {done} text tables with PSN names, {left} strings still naming Xbox.')
     for dlc in dlc_bigfiles():
         with open(dlc, 'rb') as f:
             _, _, fat = read_tables(f)
             done, left = text_status(f, fat)
         if done or left:
-            print(f'{os.path.basename(dlc)} text: {done} languages with PSN names, {left} strings still naming Xbox.')
+            print(f'{os.path.basename(dlc)} text: {done} text tables with PSN names, {left} strings still naming Xbox.')
             print('  backup:', 'yes' if os.path.exists(dlc + '.ds4bak') else 'no')
     print('  backup:', 'yes' if os.path.exists(bf + '.ds4bak') else 'no')
     clip = find_clip(folder)
