@@ -3,7 +3,7 @@
 Redraws the Xbox button icons as PlayStation ones, in two of the game's files:
 
 - `game\naruto.bf`: the font's button glyphs and the large HUD buttons.
-- `game\Naruto_clip.SRA`: the 411 button images the menus and HUD draw (they are Scaleform movies), such as the BACK/OK hints and the "Talk" prompt.
+- `game\Naruto_clip.SRA`: the 443 button images the menus and HUD draw (they are Scaleform movies), such as the BACK/OK hints and the "Talk" prompt.
 
 
 | Xbox icon | Becomes |

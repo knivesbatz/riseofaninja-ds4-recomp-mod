@@ -4,7 +4,7 @@ Swaps the Xbox button icons for PlayStation ones in two files:
   game\naruto.bf          the font's A/B/X/Y, shoulder and stick glyphs, and
                           the 64x64 HUD buttons;
   game\Naruto_clip.SRA    the button images the menus and HUD (Scaleform
-                          movies) draw, 411 of them.
+                          movies) draw, 443 of them.
 The first run copies each file to <name>.ds4bak; "restore" puts those back.
 
     python ds4_icons.py install  "<game folder>"
